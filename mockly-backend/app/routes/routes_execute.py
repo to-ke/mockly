@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
-from .models import ExecuteRequest, ExecuteResponse
-from .sandbox import run_in_sandbox
+from ..models import ExecuteRequest, ExecuteResponse
+from ..sandbox import run_in_sandbox
 import tempfile
 from pathlib import Path
 
@@ -50,10 +50,10 @@ def execute(req: ExecuteRequest) -> ExecuteResponse:
 
         # Compile if needed
         if compile_cmd:
-            _o, err, code, _t = run_in_sandbox(compile_cmd, cwd=workdir, timeout_ms=min(req.time_limit_ms, 8000))
+            _o, err, code, _t = run_in_sandbox(compile_cmd, cwd=workdir, timeout_ms=min(req.timeout_ms, 8000))
             if code != 0:
                 return ExecuteResponse(stdout="", stderr=err, exitCode=code)
 
         # Run
-        out, err, code, t = run_in_sandbox(run_cmd, stdin=req.stdin or "", cwd=workdir, timeout_ms=req.time_limit_ms)
+        out, err, code, t = run_in_sandbox(run_cmd, stdin=req.stdin or "", cwd=workdir, timeout_ms=req.timeout_ms)
         return ExecuteResponse(stdout=out, stderr=err, exitCode=code, timeMs=t)

@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from .models import WebRtcOfferPayload, WebRtcSessionResponse, WebRtcCandidatePayload
+from ..models import WebRtcOfferPayload, WebRtcSessionResponse, WebRtcCandidatePayload
 import uuid
 
 
