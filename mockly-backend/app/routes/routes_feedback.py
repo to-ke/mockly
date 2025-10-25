@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from .models import FeedbackReport
+from ..models import FeedbackReport
 
 router = APIRouter(prefix="/api", tags=["feedback"]) 
 
