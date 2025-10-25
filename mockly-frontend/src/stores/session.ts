@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Language } from '@/types/api'
+import { Api } from '@/services/api'
 
 
 interface SessionState {
@@ -10,12 +11,15 @@ interface SessionState {
     stdout: string
     stderr: string
     running: boolean
+    currentDifficulty: string | null
     setLanguage: (language: Language) => void
     setCode: (code: string) => void
     setResult: (o: { stdout?: string; stderr?: string }) => void
     setRunning: (running: boolean) => void
     resetIO: () => void
     applyQuestionPrompt: (prompt: string) => void
+    applyQuestionData: (data: { prompt: string; starter_code?: string; language?: string }) => void
+    refreshStarterCodeForLanguage: (language: Language) => Promise<void>
 }
 
 
@@ -101,10 +105,19 @@ export const useSession = create<SessionState>((set, get) => ({
     stdout: '',
     stderr: '',
     running: false,
-    setLanguage: (language) => set((state) => ({
-        language,
-        code: state.codeByLanguage[language] ?? BOILERPLATE[language],
-    })),
+    currentDifficulty: null,
+    setLanguage: (language) => {
+        const state = get()
+        set((state) => ({
+            language,
+            code: state.codeByLanguage[language] ?? BOILERPLATE[language],
+        }))
+        
+        // If we're in an interview and have a current difficulty, fetch new starter code
+        if (state.currentDifficulty && state.lastPrompt) {
+            get().refreshStarterCodeForLanguage(language)
+        }
+    },
     setCode: (code) => set((state) => ({
         code,
         codeByLanguage: { ...state.codeByLanguage, [state.language]: code },
@@ -130,5 +143,78 @@ export const useSession = create<SessionState>((set, get) => ({
             code: nextCodes[state.language],
             lastPrompt: prompt,
         })
+    },
+    applyQuestionData: (data) => {
+        const state = get()
+        if (state.lastPrompt === data.prompt) return
+
+        const { prompt, starter_code, language: suggestedLanguage, difficulty } = data
+        
+        // If a language is suggested and it's valid, switch to it
+        const targetLanguage = suggestedLanguage && LANGUAGES.includes(suggestedLanguage as Language) 
+            ? suggestedLanguage as Language 
+            : state.language
+
+        const nextCodes: Record<Language, string> = { ...state.codeByLanguage }
+        
+        LANGUAGES.forEach((language) => {
+            const commentBlock = makeCommentBlock(language, prompt)
+            let codeContent = ''
+            
+            // Use starter code if available and for the target language
+            if (starter_code && language === targetLanguage) {
+                codeContent = starter_code
+            } else {
+                // Use existing code or boilerplate
+                codeContent = nextCodes[language] ?? BOILERPLATE[language]
+            }
+            
+            // Add comment block if not already present
+            if (!codeContent.startsWith(commentBlock)) {
+                nextCodes[language] = `${commentBlock}\n\n${codeContent}`
+            } else {
+                nextCodes[language] = codeContent
+            }
+        })
+
+        set({
+            language: targetLanguage,
+            codeByLanguage: nextCodes,
+            code: nextCodes[targetLanguage],
+            lastPrompt: prompt,
+            currentDifficulty: data.difficulty || null,
+        })
+    },
+    refreshStarterCodeForLanguage: async (language) => {
+        const state = get()
+        if (!state.currentDifficulty || !state.lastPrompt) return
+        
+        try {
+            const question = await Api.fetchQuestion({ 
+                difficulty: state.currentDifficulty as any, 
+                language 
+            })
+            
+            if (question?.starter_code) {
+                const commentBlock = makeCommentBlock(language, state.lastPrompt)
+                const newCode = `${commentBlock}\n\n${question.starter_code}`
+                
+                set((state) => ({
+                    codeByLanguage: { ...state.codeByLanguage, [language]: newCode },
+                    code: language === state.language ? newCode : state.code,
+                }))
+            } else {
+                // If no starter code is available, use the boilerplate with comments
+                const commentBlock = makeCommentBlock(language, state.lastPrompt)
+                const fallbackCode = `${commentBlock}\n\n${BOILERPLATE[language]}`
+                
+                set((state) => ({
+                    codeByLanguage: { ...state.codeByLanguage, [language]: fallbackCode },
+                    code: language === state.language ? fallbackCode : state.code,
+                }))
+            }
+        } catch (error) {
+            console.error('Failed to fetch starter code for language:', error)
+        }
     },
 }))

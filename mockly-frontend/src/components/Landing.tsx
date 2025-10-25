@@ -8,7 +8,7 @@ import { useSession } from '@/stores/session'
 
 export function Landing() {
     const { difficulty, startInterview } = useAppState()
-    const { applyQuestionPrompt } = useSession()
+    const { applyQuestionData, language } = useSession()
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
 
@@ -17,10 +17,15 @@ export function Landing() {
         setError(null)
         setLoading(true)
         try {
-            // Placeholder request for later backend integration
-            const question = await Api.fetchQuestion({ difficulty })
+            // Pass current language to get appropriate starter code
+            const question = await Api.fetchQuestion({ difficulty, language })
             if (question?.prompt) {
-                applyQuestionPrompt(question.prompt)
+                applyQuestionData({
+                    prompt: question.prompt,
+                    starter_code: question.starter_code,
+                    language: question.language,
+                    difficulty: question.difficulty
+                })
             }
             startInterview()
         } catch (err: unknown) {
