@@ -1,17 +1,9 @@
 import { Button } from '@/components/Button'
-import { Play, Square, Moon, Sun, ChevronDown } from 'lucide-react'
+import LanguageDropdown from '@/components/LanguageDropdown'
+import { Play, Square, Moon, Sun } from 'lucide-react'
 import { useSession } from '@/stores/session'
 import { useTheme } from '@/stores/theme'
 import { useAppState } from '@/stores/app'
-
-
-const languages = [
-    { id: 'python', label: 'Python' },
-    { id: 'javascript', label: 'JavaScript' },
-    { id: 'typescript', label: 'TypeScript' },
-    { id: 'cpp', label: 'C++' },
-    { id: 'java', label: 'Java' },
-] as const
 
 
 interface HeaderProps {
@@ -23,7 +15,7 @@ interface HeaderProps {
 
 
 export default function Header({ onRun, onStop, onEnd, ending }: HeaderProps) {
-    const { language, setLanguage, running } = useSession()
+    const { running } = useSession()
     const { theme, toggleTheme } = useTheme()
     const { difficulty, stage } = useAppState()
 
@@ -36,21 +28,7 @@ export default function Header({ onRun, onStop, onEnd, ending }: HeaderProps) {
                 </span>
             </div>
             <div className="flex items-center gap-2">
-                <div className="relative">
-                    <select
-                        value={language}
-                        onChange={(event) => setLanguage(event.target.value as any)}
-                        aria-label="Select language"
-                        className="interactive-soft h-10 appearance-none rounded-2xl border border-border bg-surface pl-3 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/60"
-                    >
-                        {languages.map(({ id, label }) => (
-                            <option key={id} value={id} className="bg-surface text-foreground">
-                                {label}
-                            </option>
-                        ))}
-                    </select>
-                    <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                </div>
+                <LanguageDropdown />
                 {!running ? (
                     <Button onClick={onRun}><Play className="mr-2 h-4 w-4" />Run</Button>
                 ) : (
