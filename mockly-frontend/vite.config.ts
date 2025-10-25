@@ -2,6 +2,7 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { fileURLToPath, URL } from 'node:url'
 
+const backendTarget = process.env.VITE_BACKEND_URL ?? 'http://localhost:8000'
 
 export default defineConfig({
   plugins: [react()],
@@ -12,14 +13,14 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    host: '0.0.0.0',
     proxy: {
-      // When your FastAPI is ready (e.g. running on 8000)
       '/api': {
-        target: 'http://localhost:8000',
+        target: backendTarget,
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://localhost:8000',
+        target: backendTarget.replace('http', 'ws'),
         ws: true,
         changeOrigin: true,
       },
