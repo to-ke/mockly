@@ -1,0 +1,19 @@
+[tool.poetry]
+name = "calhacks12"
+version = "0.1.0"
+description = "Mockly API backend"
+authors = ["Dhruv Kesavarap"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.120.0"
+uvicorn = {extras = ["standard"], version = "^0.38.0"}
+pyyaml = "^6.0.3"
+aiortc = "^1.14.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

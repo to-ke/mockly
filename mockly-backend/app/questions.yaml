@@ -1,0 +1,79 @@
+title: "Questions"
+metadata:
+  author: "Mockly Team"
+  created: "2025-10-24"
+
+languages:
+  - Python
+  - Java
+  - JavaScript
+  - TypeScript
+  - C++
+
+difficulties:
+  - difficulty: easy
+    problems:
+      - title: "Two Sum (Unique Pair)"
+        statement: |
+          Given an array of integers nums and an integer target, return indices
+          of the two numbers such that they add up to target. Assume exactly one
+          solution and you may not use the same element twice.
+        input_format: |
+          - nums: integer array (length 2..1e5, |nums[i]| <= 1e9)
+          - target: integer (|target| <= 1e9)
+        output_format: |
+          - integer array of length 2 (0-indexed indices, i < j)
+        examples:
+          - name: basic
+            input: { nums: [2,7,11,15], target: 9 }
+            output: [0,1]
+            explanation: 2 + 7 = 9
+          - name: negative-values
+            input: { nums: [-3,4,3,90], target: 0 }
+            output: [0,2]
+        hints:
+          - "Store complements: for x at i, you need target - x seen earlier."
+          - "One pass is enough; check before inserting current index."
+
+  - difficulty: medium
+    problems:
+      - title: "3Sum"
+        statement: |
+          Given an integer array nums, return all the unique triplets [nums[i], nums[j], nums[k]] such that
+          i != j, i != k, j != k, and nums[i] + nums[j] + nums[k] == 0.
+          The solution set must not contain duplicate triplets.
+        input_format: |
+          - nums: integer array (length 0..1e4, |nums[i]| <= 1e9)
+        output_format: |
+          - list of triplets, each a list of three integers in non-decreasing order
+          - no duplicate triplets; order of triplets does not matter
+        examples:
+          - input: { nums: [-1,0,1,2,-1,-4] }
+            output: [[-1,-1,2],[-1,0,1]]
+            explanation: "Triplets summing to 0 with no duplicates."
+          - input: { nums: [] }
+            output: []
+          - input: { nums: [0,0,0,0] }
+            output: [[0,0,0]]
+        hints:
+          - "Sort first; for each i, move l/r toward center based on sum; skip duplicates for i, l, and r."
+          - "Early break/continue: if nums[i] > 0 then stop; if i>0 and nums[i]==nums[i-1], continue."
+
+  - difficulty: hard
+    problems:
+      - title: "Median of Two Sorted Arrays"
+        statement: |
+          Given two sorted arrays nums1 and nums2 of size m and n respectively, return the median of the two.
+          The overall run time complexity should be O(log(min(m,n))).
+        input_format: |
+          - nums1: sorted int array
+          - nums2: sorted int array
+        output_format: "float (median)"
+        examples:
+          - input: { nums1: [1,3], nums2: [2] }
+            output: 2.0
+          - input: { nums1: [1,2], nums2: [3,4] }
+            output: 2.5
+        hints:
+          - "Search cut i in smaller array; j = half - i. Compare borders L1,R1,L2,R2."
+          - "Odd length: max(L1,L2); even length: average of max(L*) and min(R*)."
