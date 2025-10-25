@@ -41,7 +41,6 @@ export function FloatingPane() {
     const [micMuted, setMicMuted] = useState(true)
     const [micBusy, setMicBusy] = useState(false)
     const [micError, setMicError] = useState<string | null>(null)
-    const [headError, setHeadError] = useState<string | null>(null)
     const ensureAudioStreamer = useCallback(() => {
         if (!audioStreamerRef.current) {
             audioStreamerRef.current = new AudioStreamer()
@@ -165,9 +164,6 @@ export function FloatingPane() {
     }, [ensureAudioStreamer])
 
 
-    useEffect(() => {
-        let cancelled = false
-        let rafId: number | null = null
     const handleToggleMute = async (event?: React.MouseEvent) => {
         event?.stopPropagation()
         setMicError(null)
@@ -188,11 +184,6 @@ export function FloatingPane() {
             setMicBusy(false)
         }
     }
-
-
-    const handleHeadError = useCallback((message: string | null) => {
-        setHeadError(message ?? null)
-    }, [])
 
 
     const statusMessage = micError

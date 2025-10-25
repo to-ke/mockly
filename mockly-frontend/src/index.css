@@ -112,5 +112,3 @@ body { @apply bg-background text-foreground transition-colors duration-200; }
   background: var(--primary);
   transform: scaleY(1.1);
 }
-
-*** End Patch
