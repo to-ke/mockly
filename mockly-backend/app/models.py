@@ -19,7 +19,7 @@ class QuestionPayload(BaseModel):
 
 # --- Code execution ---
 class ExecuteRequest(BaseModel):
-    language: Literal["python", "javascript", "typescript", "cpp", "java"]
+    language: Literal["python", "javascript", "typescript", "cpp", "java", "perl", "kotlin", "c", "csharp", "ruby", "go"]
     source: str
     stdin: Optional[str] = None
     timeoutMs: Optional[int] = None

@@ -29,7 +29,7 @@ INTERPRETED_COMMANDS: Dict[str, Dict[str, List[str]]] = {
             "ts-node",
             "--transpile-only",
             "--compiler-options",
-            TS_COMPILER_OPTIONS,
+            '{"module":"commonjs","moduleResolution":"node"}',
             "{file}",
         ],
     },
@@ -301,7 +301,7 @@ def _run_csharp(payload, stdin_bytes, timeout, tmp_dir, started):
     project_content = """<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
   </PropertyGroup>
 </Project>"""
     project_path.write_text(project_content)

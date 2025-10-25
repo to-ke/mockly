@@ -23,13 +23,10 @@ const BOILERPLATE: Record<Language, string> = {
     python: 'print("Hello from Python")',
     javascript: 'console.log("Hello from JS")',
     typescript: 'const msg: string = "Hello from TS";\nconsole.log(msg);',
-    cpp: `#include <bits/stdc++.h>
+    cpp: `#include <iostream>
 using namespace std;
 
 int main() {
-    ios::sync_with_stdio(false);
-    cin.tie(nullptr);
-
     cout << "Hello C++" << endl;
     return 0;
 }`,
