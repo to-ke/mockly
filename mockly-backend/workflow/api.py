@@ -12,19 +12,16 @@ import json
 from pathlib import Path
 import base64
 import httpx
-import os
 
 from anthropic import Anthropic
 from deepgram import DeepgramClient
 from deepgram.core.events import EventType
-from fastapi.middleware.cors import CORSMiddleware
 
 
 from config import (
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
     DEEPGRAM_API_KEY, DEEPGRAM_TTS_VOICE,
     DEEPGRAM_STREAM_ENCODING, DEEPGRAM_SAMPLE_RATE,
-    CORS_ALLOW_ORIGINS,
 )
 
 # Optional YAML support for loading questions by difficulty
@@ -35,16 +32,6 @@ except Exception:  # pragma: no cover
 
 logging.basicConfig(level=logging.INFO)
 app = FastAPI(title="Local Voice/Text Assistant Streaming")
-
-# CORS so FE can POST JSON and stream responses
-_cors_origins = CORS_ALLOW_ORIGINS if CORS_ALLOW_ORIGINS else ["*"]
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    allow_credentials=False,
-)
 
 # ---------- SDK clients ----------
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -831,32 +818,6 @@ async def type_to_voice(request: Request):
 @app.get("/health")
 def health():
     return {"ok": True}
-
-# ---------- FE helper: audio config ----------
-@app.get("/audio/config")
-def audio_config():
-    return {
-        "encoding": DEEPGRAM_STREAM_ENCODING,
-        "sample_rate": DEEPGRAM_SAMPLE_RATE,
-        "channels": 1,
-        "content_type": f"audio/L16; rate={DEEPGRAM_SAMPLE_RATE}; channels=1",
-    }
-
-# ---------- Route aliases under /api prefix (to match FE proxy) ----------
-# These mirror existing endpoints so the frontend can call /api/*
-app.add_api_route("/api/health", health, methods=["GET"])
-app.add_api_route("/api/audio/config", audio_config, methods=["GET"])
-
-# Core streaming endpoints
-app.add_api_route("/api/input/stream", input_stream, methods=["POST"])
-app.add_api_route("/api/type/stream", type_streaming, methods=["POST"])
-app.add_api_route("/api/type", type_to_voice, methods=["POST"])
-
-# Debug helpers
-app.add_api_route("/api/debug/claude/stream", debug_claude_stream, methods=["POST"])
-app.add_api_route("/api/debug/tts", debug_tts, methods=["GET"])
-app.add_api_route("/api/debug/tts-min", debug_tts_min, methods=["GET"])
-app.add_api_route("/api/eval/parse", eval_parse, methods=["POST"])
 
 # ---------- Utility endpoint: parse evaluation scores ----------
 @app.post("/eval/parse")
