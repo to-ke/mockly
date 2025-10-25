@@ -1,0 +1,114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+:root {
+  color-scheme: light;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --surface: #ffffff;
+  --border: rgba(15, 23, 42, 0.12);
+  --accent: #e2e8f0;
+  --accent-foreground: #0f172a;
+  --muted: #e2e8f0;
+  --muted-foreground: #475569;
+  --primary: #2563eb;
+  --primary-foreground: #f8fafc;
+  --destructive: #ef4444;
+  --destructive-foreground: #ffffff;
+  --scrollbar-track: #e2e8f0;
+  --scrollbar-thumb: #94a3b8;
+}
+
+.dark {
+  color-scheme: dark;
+  --background: #0b0e14;
+  --foreground: #e6e9ef;
+  --surface: #0e1220;
+  --border: #1f2933;
+  --accent: #1b2230;
+  --accent-foreground: #cdd6f4;
+  --muted: #13192a;
+  --muted-foreground: #9aa4c6;
+  --primary: #6cb6ff;
+  --primary-foreground: #0b0e14;
+  --destructive: #f87171;
+  --destructive-foreground: #0b0e14;
+  --scrollbar-track: #0b0e14;
+  --scrollbar-thumb: #222;
+}
+
+html, body, #root { height: 100%; }
+body { @apply bg-background text-foreground transition-colors duration-200; }
+
+
+/* Scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+*::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 9999px; }
+
+
+@keyframes fade-in-soft {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes float-pop {
+  0% { opacity: 0; transform: translateY(8px) scale(0.96); }
+  60% { opacity: 1; transform: translateY(-2px) scale(1.01); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.page-transition {
+  animation: fade-in-soft 0.4s ease-out both;
+}
+
+.card-rise {
+  animation: fade-in-soft 0.6s ease-out both;
+}
+
+.floating-pop-panel {
+  animation: float-pop 0.6s ease-out both;
+}
+
+.interactive-soft {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.interactive-soft:hover {
+  transform: translateY(-1px);
+}
+
+.interactive-soft:active {
+  transform: translateY(0);
+}
+
+
+.resizer-handle {
+  align-self: stretch;
+  width: 12px;
+  margin: 0 -6px;
+  cursor: col-resize;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.resizer-handle::after {
+  content: "";
+  width: 3px;
+  height: 48px;
+  border-radius: 9999px;
+  background: var(--border);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.resizer-handle:hover::after,
+.resizer-handle:active::after,
+.resizer-handle-active::after {
+  background: var(--primary);
+  transform: scaleY(1.1);
+}
