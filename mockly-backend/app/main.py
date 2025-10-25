@@ -10,10 +10,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.routes.routes_execute import router as execute_router
 from app.routes.routes_questions import router as questions_router
 from app.routes.routes_feedback import router as feedback_router
 from app.routes.routes_webrtc import router as webrtc_router
+from app.routes.routes_execute import router as execute_router
 
 
 app = FastAPI(title="Mockly", version="0.1.0")
@@ -29,10 +29,10 @@ app.add_middleware(
 )
 
 
-app.include_router(execute_router)
 app.include_router(questions_router)
 app.include_router(feedback_router)
 app.include_router(webrtc_router)
+app.include_router(execute_router)
 
 
 @app.get("/")

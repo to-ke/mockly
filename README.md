@@ -1,12 +1,11 @@
 # Mockly
 
-Mockly is a full-stack coding-interview practice experience. The Vite/React frontend presents interview flows (landing → live editor → feedback), while the FastAPI backend powers code execution, problem distribution, structured feedback, and WebRTC signaling. This repo is a mono workspace that keeps both apps in sync.
+Mockly is a full-stack coding-interview practice experience. The Vite/React frontend presents interview flows (landing → live editor → feedback), while the FastAPI backend powers problem distribution, structured feedback, and WebRTC signaling. This repo is a mono workspace that keeps both apps in sync.
 
 ## Architecture
 
 - **Frontend (`mockly-frontend`)** – Vite + React + TypeScript UI with Tailwind and Zustand state. Calls `src/services/api.ts` for `/api/*` endpoints, manages the Monaco-like editor, and renders problems, execution results, and feedback.
 - **Backend (`mockly-backend`)** – FastAPI service exposing:
-  - `POST /api/execute` to compile/run snippets in a sandbox.
   - `POST /api/questions` to fetch prompts (with embedded examples) backed by `questions.yaml`.
   - `GET /api/feedback` for canned structured feedback.
   - `POST /api/webrtc/offer`, `POST /api/webrtc/candidate`, `DELETE /api/webrtc/session/:id` for lightweight WebRTC signaling.
@@ -14,7 +13,7 @@ Mockly is a full-stack coding-interview practice experience. The Vite/React fron
 - **Local proxying** – The Vite dev server proxies `/api` to `localhost:8000`, so browser calls reach FastAPI without manual CORS fiddling.
 
 ```
-frontend (Vite dev server) --/api--> FastAPI -- sandbox runner/per diff YAML
+frontend (Vite dev server) --/api--> FastAPI -- question/feedback store
 ```
 
 ## Repository layout
@@ -22,7 +21,7 @@ frontend (Vite dev server) --/api--> FastAPI -- sandbox runner/per diff YAML
 ```
 mockly/
 ├── mockly-frontend/       # React client
-├── mockly-backend/        # FastAPI app + sandbox runner
+├── mockly-backend/        # FastAPI app (questions, feedback, WebRTC)
 ├── questions.yaml         # Source of truth for prompts
 ├── environment.yml        # Optional Python env descriptor
 └── README.md              # You are here
@@ -54,7 +53,6 @@ The Vite dev server runs on `http://localhost:5173` and proxies `/api` to the ba
 ## API surface (summary)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/execute` | POST | Compile/run code with language, source, stdin, timeout. |
 | `/api/questions` | POST | Retrieve a random prompt for a given difficulty, including example IO. |
 | `/api/feedback` | GET | Fetch static structured interview feedback. |
 | `/api/webrtc/offer` | POST | Create a signaling session (placeholder echo implementation). |

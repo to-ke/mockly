@@ -1,26 +1,6 @@
 from __future__ import annotations
 from typing import Literal, Optional, List, Dict
-from pydantic import BaseModel, Field
-
-
-# --- Execute ---
-class ExecuteRequest(BaseModel):
-    language: Literal["python", "javascript", "typescript", "java", "cpp"]
-    source: str
-    stdin: Optional[str] = ""
-    filename: Optional[str] = None  # optional hint for file naming
-    timeout_ms: int = Field(default=4000, alias="timeoutMs")
-    memory_limit_mb: int = Field(default=256, alias="memoryLimitMb")
-
-    class Config:
-        allow_population_by_field_name = True
-
-
-class ExecuteResponse(BaseModel):
-    stdout: str
-    stderr: str
-    exitCode: int
-    timeMs: Optional[int] = None
+from pydantic import BaseModel
 
 
 # --- Questions ---
@@ -35,6 +15,21 @@ class QuestionPayload(BaseModel):
     starter_code: Optional[str] = None
     language: Optional[str] = None
     answers: Optional[List[str]] = None
+
+
+# --- Code execution ---
+class ExecuteRequest(BaseModel):
+    language: Literal["python", "javascript", "typescript", "cpp", "java"]
+    source: str
+    stdin: Optional[str] = None
+    timeoutMs: Optional[int] = None
+
+
+class ExecuteResponse(BaseModel):
+    stdout: str
+    stderr: str
+    exitCode: int
+    timeMs: Optional[int] = None
 
 
 # --- Feedback ---
