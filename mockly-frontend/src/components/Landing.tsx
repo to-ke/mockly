@@ -44,11 +44,11 @@ export function Landing() {
                 </p>
             </header>
             <section className="card-rise delay-100 w-full max-w-md rounded-3xl border border-border bg-surface/70 p-6 shadow-xl backdrop-blur">
-                <div className="mb-4">
+                <div className="mb-4 text-center">
                     <label className="block text-sm font-medium text-muted-foreground">
                         Select question difficulty
                     </label>
-                    <div className="mt-2">
+                    <div className="mt-2 flex justify-center">
                         <DifficultyDropdown />
                     </div>
                 </div>
