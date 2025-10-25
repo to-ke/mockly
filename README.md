@@ -9,6 +9,7 @@ Mockly is a full-stack coding-interview practice experience. The Vite/React fron
   - `POST /api/questions` to fetch prompts (with embedded examples) backed by `questions.yaml`.
   - `GET /api/feedback` for canned structured feedback.
   - `POST /api/webrtc/offer`, `POST /api/webrtc/candidate`, `DELETE /api/webrtc/session/:id` for lightweight WebRTC signaling.
+  - `POST /api/execute` to compile/run Python, JavaScript, TypeScript, C++, and Java snippets inside an isolated temp workspace.
 - **Shared data** – `questions.yaml` stores multi-difficulty prompts consumed at startup by the backend.
 - **Local proxying** – The Vite dev server proxies `/api` to `localhost:8000`, so browser calls reach FastAPI without manual CORS fiddling.
 
@@ -34,6 +35,12 @@ mockly/
 - Python 3.11+
 - (optional) Poetry for backend dependency management
 
+### One-command stack (Docker)
+```bash
+docker compose up --build
+```
+This builds the backend runner image (with Node, ts-node, g++, and the JDK installed) plus the frontend dev-server image, then exposes the apps on `http://localhost:8000` (API) and `http://localhost:5173` (Vite). Use this path if you want the code-execution endpoint to work without manually installing extra toolchains.
+
 ### Backend
 ```bash
 cd mockly-backend
@@ -41,6 +48,7 @@ poetry install         # or pip install -r <generated>
 poetry run uvicorn app.main:app --reload
 ```
 This exposes FastAPI on `http://localhost:8000`.
+> **Heads up:** `/api/execute` shells out to `python3`, `node`, `ts-node`, `g++`, and `javac`. Install those locally or run the backend via `docker compose up backend` so the containerized toolchain handles execution for you.
 
 ### Frontend
 ```bash
@@ -55,6 +63,7 @@ The Vite dev server runs on `http://localhost:5173` and proxies `/api` to the ba
 |----------|--------|-------------|
 | `/api/questions` | POST | Retrieve a random prompt for a given difficulty, including example IO. |
 | `/api/feedback` | GET | Fetch static structured interview feedback. |
+| `/api/execute` | POST | Run Python/JS/TS/C++/Java against optional stdin and return stdout/stderr/exit code. |
 | `/api/webrtc/offer` | POST | Create a signaling session (placeholder echo implementation). |
 | `/api/webrtc/candidate` | POST | Push ICE candidates into the session store. |
 | `/api/webrtc/session/{id}` | DELETE | Close an in-memory signaling session. |
