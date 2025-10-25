@@ -1,73 +1,48 @@
-# React + TypeScript + Vite
+# Mockly Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Mockly frontend is a Vite + React + TypeScript single-page app that guides candidates through a mock interview: difficulty selection → live coding (Monaco-like editor) → feedback. It consumes `/api/*` endpoints exposed by the FastAPI backend and handles state via Zustand.
 
-Currently, two official plugins are available:
+## Stack
+- **Build tooling**: Vite, TypeScript, SWC React plugin
+- **UI**: React 18, Tailwind (utility classes live under `src/styles`), custom components in `src/components`
+- **State**: Zustand stores (`src/stores/app.ts`, `src/stores/session.ts`)
+- **API client**: `src/services/api.ts` centralizes fetch logic for execute/questions/feedback/WebRTC
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## Key flows
+1. **Landing (`src/components/Landing.tsx`)** – lets the user pick a difficulty and fetches a prompt via `Api.fetchQuestion`.
+2. **Editor pane (`src/components/EditorPane.tsx`)** – renders the language selector + code editor, backed by `useSession` for boilerplate per language.
+3. **Execution** – `Api.execute` posts code to `/api/execute` and streams stdout/stderr back into the store.
+4. **Feedback** – Once an interview is completed, the UI calls `Api.fetchFeedback` and shows the structured report.
+5. **WebRTC signaling** – `Api.createWebRtcSession` / `sendWebRtcCandidate` wire up the remote IDE stream (placeholder backend currently echoes data).
 
-## React Compiler
+## Development
+```bash
+npm install         # install deps
+npm run dev         # start Vite on http://localhost:5173
+```
+The dev server proxies `/api` to `http://localhost:8000` (see `vite.config.ts`) so the browser talks to FastAPI without extra configuration.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Scripts
+- `npm run dev` – Vite dev server with HMR and proxying
+- `npm run build` – production build (outputs to `dist/`)
+- `npm run preview` – preview the production build locally
+- `npm run lint` – run ESLint against the codebase
 
-## Expanding the ESLint configuration
+## Environment
+Create `mockly-frontend/.env.local` to override defaults exposed via `import.meta.env`, such as `VITE_USE_MOCK`. When `VITE_USE_MOCK=true`, the app short-circuits API calls with local mock data to unblock UI work.
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+## Project structure (frontend)
+```
+mockly-frontend/
+├── src/
+│   ├── components/        # UI building blocks (Landing, EditorPane, Header, etc.)
+│   ├── services/api.ts    # Fetch helpers (execute/questions/feedback/WebRTC)
+│   ├── stores/            # Zustand stores for app+session state
+│   ├── types/             # Shared TypeScript types (api.ts, etc.)
+│   └── main.tsx           # App bootstrap
+├── public/                # Static assets served by Vite
+├── vite.config.ts         # Dev server + alias configuration
+└── README.md              # This file
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Pair this frontend with the backend described in `../mockly-backend/README.md`.
