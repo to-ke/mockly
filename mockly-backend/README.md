@@ -35,6 +35,12 @@ To enable `/api/execute` locally you also need:
 - `npm install -g ts-node typescript`
 - `g++` (build-essential on Debian/Ubuntu, Xcode CLT on macOS)
 - `javac` (OpenJDK or similar)
+- `perl` (for Perl support)
+- `ruby` (for Ruby support)
+- `gcc` (for C support)
+- `dotnet` (for C# support)
+- `kotlinc` (Kotlin compiler)
+- `go` (for Go support)
 
 **Easiest option:** run the backend inside the prebuilt image that already bundles these toolchains:
 ```bash
@@ -72,7 +78,7 @@ Body:
   "timeoutMs": 5000
 }
 ```
-Supported languages: `python`, `javascript`, `typescript`, `cpp`, `java`. Each request is written to a temp workspace under `/app/.runner`, executed with the appropriate runtime/compiler, and returns:
+Supported languages: `python`, `javascript`, `typescript`, `cpp`, `java`, `perl`, `kotlin`, `c`, `csharp`, `ruby`, `go`. Each request is written to a temp workspace under `/app/.runner`, executed with the appropriate runtime/compiler, and returns:
 ```json
 {
   "stdout": "hi\n",

@@ -1,4 +1,4 @@
-export type Language = 'python' | 'javascript' | 'typescript' | 'cpp' | 'java';
+export type Language = 'python' | 'javascript' | 'typescript' | 'cpp' | 'java' | 'perl' | 'kotlin' | 'c' | 'csharp' | 'ruby' | 'go';
 
 
 export interface ExecuteRequest {

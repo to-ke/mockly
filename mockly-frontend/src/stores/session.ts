@@ -38,6 +38,31 @@ int main() {
         System.out.println("Hello Java");
     }
 }`,
+    perl: 'print "Hello from Perl\\n";',
+    kotlin: `fun main() {
+    println("Hello from Kotlin")
+}`,
+    c: `#include <stdio.h>
+
+int main() {
+    printf("Hello from C\\n");
+    return 0;
+}`,
+    csharp: `using System;
+
+class Program {
+    static void Main() {
+        Console.WriteLine("Hello from C#");
+    }
+}`,
+    ruby: 'puts "Hello from Ruby"',
+    go: `package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello from Go")
+}`,
 }
 
 
@@ -47,10 +72,16 @@ const COMMENT_PREFIX: Record<Language, string> = {
     typescript: '//',
     cpp: '//',
     java: '//',
+    perl: '#',
+    kotlin: '//',
+    c: '//',
+    csharp: '//',
+    ruby: '#',
+    go: '//',
 }
 
 
-const LANGUAGES: Language[] = ['python', 'javascript', 'typescript', 'cpp', 'java']
+const LANGUAGES: Language[] = ['python', 'javascript', 'typescript', 'cpp', 'java', 'perl', 'kotlin', 'c', 'csharp', 'ruby', 'go']
 
 
 const INITIAL_CODES: Record<Language, string> = { ...BOILERPLATE }

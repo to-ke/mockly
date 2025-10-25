@@ -12,7 +12,7 @@ from ..models import ExecuteRequest, ExecuteResponse
 router = APIRouter(prefix="/api", tags=["execute"])
 
 
-EXEC_ROOT = Path("/app/.runner")
+EXEC_ROOT = Path(".runner")
 EXEC_ROOT.mkdir(parents=True, exist_ok=True)
 
 
@@ -33,6 +33,8 @@ INTERPRETED_COMMANDS: Dict[str, Dict[str, List[str]]] = {
             "{file}",
         ],
     },
+    "perl": {"extension": ".pl", "cmd": ["perl", "{file}"]},
+    "ruby": {"extension": ".rb", "cmd": ["ruby", "{file}"]},
 }
 
 DEFAULT_TIMEOUT_SECONDS = 5.0
@@ -70,6 +72,18 @@ def execute_code(payload: ExecuteRequest) -> ExecuteResponse:
 
         if payload.language == "java":
             return _run_java(payload, stdin_bytes, timeout, tmp_dir, started)
+
+        if payload.language == "c":
+            return _run_c(payload, stdin_bytes, timeout, tmp_dir, started)
+
+        if payload.language == "csharp":
+            return _run_csharp(payload, stdin_bytes, timeout, tmp_dir, started)
+
+        if payload.language == "kotlin":
+            return _run_kotlin(payload, stdin_bytes, timeout, tmp_dir, started)
+
+        if payload.language == "go":
+            return _run_go(payload, stdin_bytes, timeout, tmp_dir, started)
 
         return ExecuteResponse(
             stdout="",
@@ -197,6 +211,174 @@ def _run_java(payload, stdin_bytes, timeout, tmp_dir, started):
         return ExecuteResponse(
             stdout="",
             stderr="Java runtime is not available on the server.",
+            exitCode=1,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return _timeout_response(exc, timeout)
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return ExecuteResponse(
+        stdout=run_proc.stdout.decode("utf-8", errors="replace"),
+        stderr=run_proc.stderr.decode("utf-8", errors="replace"),
+        exitCode=run_proc.returncode,
+        timeMs=duration_ms,
+    )
+
+
+def _run_c(payload, stdin_bytes, timeout, tmp_dir, started):
+    source_path = Path(tmp_dir) / "main.c"
+    exe_path = Path(tmp_dir) / "main.bin"
+    source_path.write_text(payload.source)
+
+    compile_cmd = [
+        "gcc",
+        str(source_path),
+        "-std=c99",
+        "-O2",
+        "-pipe",
+        "-o",
+        str(exe_path),
+    ]
+    try:
+        compile_proc = _run_process(compile_cmd, None, timeout)
+    except FileNotFoundError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="C compiler is not available on the server.",
+            exitCode=1,
+        )
+    if compile_proc.returncode != 0:
+        return ExecuteResponse(
+            stdout=compile_proc.stdout.decode("utf-8", errors="replace"),
+            stderr=compile_proc.stderr.decode("utf-8", errors="replace"),
+            exitCode=compile_proc.returncode,
+        )
+
+    try:
+        exe_path.chmod(0o755)
+    except FileNotFoundError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="C runner failed to produce an executable binary.",
+            exitCode=1,
+        )
+
+    try:
+        run_proc = _run_process([str(exe_path)], stdin_bytes, timeout)
+    except subprocess.TimeoutExpired as exc:
+        return _timeout_response(exc, timeout)
+    except PermissionError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="C binary could not be executed (permission denied).",
+            exitCode=1,
+        )
+    except FileNotFoundError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="C runner is not available on the server.",
+            exitCode=1,
+        )
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return ExecuteResponse(
+        stdout=run_proc.stdout.decode("utf-8", errors="replace"),
+        stderr=run_proc.stderr.decode("utf-8", errors="replace"),
+        exitCode=run_proc.returncode,
+        timeMs=duration_ms,
+    )
+
+
+def _run_csharp(payload, stdin_bytes, timeout, tmp_dir, started):
+    source_path = Path(tmp_dir) / "Program.cs"
+    exe_path = Path(tmp_dir) / "Program.exe"
+    source_path.write_text(payload.source)
+
+    compile_cmd = ["dotnet", "run", "--project", str(tmp_dir)]
+    
+    # Create a simple project file for C#
+    project_path = Path(tmp_dir) / "Program.csproj"
+    project_content = """<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+</Project>"""
+    project_path.write_text(project_content)
+
+    try:
+        run_proc = _run_process(compile_cmd, stdin_bytes, timeout)
+    except FileNotFoundError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="C# runtime (dotnet) is not available on the server.",
+            exitCode=1,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return _timeout_response(exc, timeout)
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return ExecuteResponse(
+        stdout=run_proc.stdout.decode("utf-8", errors="replace"),
+        stderr=run_proc.stderr.decode("utf-8", errors="replace"),
+        exitCode=run_proc.returncode,
+        timeMs=duration_ms,
+    )
+
+
+def _run_kotlin(payload, stdin_bytes, timeout, tmp_dir, started):
+    source_path = Path(tmp_dir) / "Main.kt"
+    source_path.write_text(payload.source)
+
+    compile_cmd = ["kotlinc", str(source_path), "-include-runtime", "-d", str(Path(tmp_dir) / "Main.jar")]
+    try:
+        compile_proc = _run_process(compile_cmd, None, timeout)
+    except FileNotFoundError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="Kotlin compiler is not available on the server.",
+            exitCode=1,
+        )
+    if compile_proc.returncode != 0:
+        return ExecuteResponse(
+            stdout=compile_proc.stdout.decode("utf-8", errors="replace"),
+            stderr=compile_proc.stderr.decode("utf-8", errors="replace"),
+            exitCode=compile_proc.returncode,
+        )
+
+    run_cmd = ["java", "-jar", str(Path(tmp_dir) / "Main.jar")]
+    try:
+        run_proc = _run_process(run_cmd, stdin_bytes, timeout)
+    except FileNotFoundError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="Java runtime is not available on the server.",
+            exitCode=1,
+        )
+    except subprocess.TimeoutExpired as exc:
+        return _timeout_response(exc, timeout)
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    return ExecuteResponse(
+        stdout=run_proc.stdout.decode("utf-8", errors="replace"),
+        stderr=run_proc.stderr.decode("utf-8", errors="replace"),
+        exitCode=run_proc.returncode,
+        timeMs=duration_ms,
+    )
+
+
+def _run_go(payload, stdin_bytes, timeout, tmp_dir, started):
+    source_path = Path(tmp_dir) / "main.go"
+    source_path.write_text(payload.source)
+
+    # Go can run directly without compilation
+    run_cmd = ["go", "run", str(source_path)]
+    try:
+        run_proc = _run_process(run_cmd, stdin_bytes, timeout)
+    except FileNotFoundError:
+        return ExecuteResponse(
+            stdout="",
+            stderr="Go runtime is not available on the server.",
             exitCode=1,
         )
     except subprocess.TimeoutExpired as exc:
