@@ -1,6 +1,6 @@
-# api.py — Streaming Claude (SSE) -> Streaming Deepgram TTS (WS)
+﻿# api.py — Streaming Claude (SSE) -> Streaming Deepgram TTS (WS)
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Body
 from fastapi.responses import Response, StreamingResponse
 import asyncio
 import logging
@@ -10,16 +10,21 @@ import time
 import contextlib
 import json
 from pathlib import Path
+import base64
+import httpx
+import os
 
 from anthropic import Anthropic
 from deepgram import DeepgramClient
 from deepgram.core.events import EventType
+from fastapi.middleware.cors import CORSMiddleware
 
 
 from config import (
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL,
     DEEPGRAM_API_KEY, DEEPGRAM_TTS_VOICE,
     DEEPGRAM_STREAM_ENCODING, DEEPGRAM_SAMPLE_RATE,
+    CORS_ALLOW_ORIGINS,
 )
 
 # Optional YAML support for loading questions by difficulty
@@ -29,7 +34,17 @@ except Exception:  # pragma: no cover
     _yaml = None
 
 logging.basicConfig(level=logging.INFO)
-app = FastAPI(title="Local Voice/Text Assistant — Streaming")
+app = FastAPI(title="Local Voice/Text Assistant Streaming")
+
+# CORS so FE can POST JSON and stream responses
+_cors_origins = CORS_ALLOW_ORIGINS if CORS_ALLOW_ORIGINS else ["*"]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    allow_credentials=False,
+)
 
 # ---------- SDK clients ----------
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
@@ -140,7 +155,7 @@ def build_system_prompt_from_question(question: dict | None) -> str:
         "- Present the coding question in a language-agnostic way since the candidate can choose any programming language",
         "- Clearly state the problem, provide examples, and specify any constraints",
         "- Do not mention specific language syntax or data structures that are language-specific",
-        "- Ask the candidate what programming language they'd like to use",
+        "- Do not ask what programming language they want to use; stay language-agnostic unless they volunteer a preference",
         "",
         "**Giving Hints:**",
         "- You have exactly TWO hints available from the question details",
@@ -254,7 +269,7 @@ def stream_claude_text(user_text: str, system_override: str | None = None) -> It
         model=ANTHROPIC_MODEL,
         system=(system_override or build_system_prompt_from_question({})),
         messages=[{"role": "user", "content": user_text}],
-        max_tokens=1024,
+        max_tokens=1024
     ) as stream:
         for piece in getattr(stream, "text_stream", []) or []:
             if piece:
@@ -315,76 +330,97 @@ def sanitize_for_tts(text: str) -> str:
     text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
 
-# ---------- Deepgram TTS — WebSocket streaming (robust & SDK-agnostic) ----------
-async def stream_deepgram_tts(sentences: Iterable[str]) -> AsyncIterator[bytes]:
+# ---------- Helper to  ----------
+async def _send_chunks_via_ws(ws, sentences) -> None:
+    """Send chunks using {'type':'Speak'} messages.
+    Rate-limit Flush: only flush when enough text has accumulated
+    or a minimum interval has elapsed; then Close at the end.
     """
-    One WS connection. For each text chunk:
-      - send {"type":"Text","text": ...}
-      - send {"type":"Flush"}
-    At the end:
-      - send {"type":"Close"}
+    try:
+        any_sent = False
+        # Flush thresholds (tuneable)
+        FLUSH_CHARS = 220
+        FLUSH_MS = 650
+        last_flush = time.perf_counter()
+        pending_chars = 0
 
-    Yields **only** audio frames (bytes). Handles both raw bytes and typed "Audio" events.
-    """
+        # Async iterator path
+        if hasattr(sentences, "__aiter__"):
+            async for sentence in sentences:  # type: ignore[attr-defined]
+                clean = sanitize_for_tts(str(sentence)).strip()
+                if not clean:
+                    continue
+                payload = json.dumps({"type": "Speak", "text": clean})
+                ws.send_text(payload)                       # <-- STRING JSON
+                logging.info(f"[Deepgram WS] SENT Speak: {clean[:120]!r}")
+                any_sent = True
+                pending_chars += len(clean)
+                now = time.perf_counter()
+                if pending_chars >= FLUSH_CHARS or (now - last_flush) * 1000.0 >= FLUSH_MS:
+                    ws.send_text(json.dumps({"type": "Flush"}))
+                    logging.info("[Deepgram WS] SENT Flush")
+                    pending_chars = 0
+                    last_flush = now
+                await asyncio.sleep(0)
+
+        # Sync iterable path
+        else:
+            for sentence in sentences:  # type: ignore
+                clean = sanitize_for_tts(str(sentence)).strip()
+                if not clean:
+                    continue
+                payload = json.dumps({"type": "Speak", "text": clean})
+                ws.send_text(payload)                       # <-- STRING JSON
+                logging.info(f"[Deepgram WS] SENT Speak: {clean[:120]!r}")
+                any_sent = True
+                pending_chars += len(clean)
+                now = time.perf_counter()
+                if pending_chars >= FLUSH_CHARS or (now - last_flush) * 1000.0 >= FLUSH_MS:
+                    ws.send_text(json.dumps({"type": "Flush"}))
+                    logging.info("[Deepgram WS] SENT Flush")
+                    pending_chars = 0
+                    last_flush = now
+                await asyncio.sleep(0)
+    finally:
+        # Final Flush if there is pending content
+        with contextlib.suppress(Exception):
+            ws.send_text(json.dumps({"type": "Flush"}))
+            logging.info("[Deepgram WS] SENT Flush (final)")
+        # Close after sending chunks
+        ws.send_text(json.dumps({"type": "Close"}))         # <-- STRING JSON
+        logging.info("[Deepgram WS] SENT Close")
+
+# ---------- Deepgram TTS — WebSocket streaming (robust & SDK-agnostic) ----------
+async def stream_deepgram_tts(sentences) -> AsyncIterator[bytes]:
     q: asyncio.Queue[bytes] = asyncio.Queue()
     closed = {"flag": False}
     saw_audio = {"flag": False}
 
     def on_message(msg):
-        # Case 1: raw PCM bytes
         if isinstance(msg, (bytes, bytearray)):
             saw_audio["flag"] = True
-            q.put_nowait(bytes(msg))
-            return
-
-        # Case 2: typed payload (some SDK builds wrap frames)
+            q.put_nowait(bytes(msg)); return
         mtype = getattr(msg, "type", None) or getattr(msg, "_type", None)
         data  = getattr(msg, "data", None)
         if str(mtype).lower() == "audio" and isinstance(data, (bytes, bytearray)):
             saw_audio["flag"] = True
-            q.put_nowait(bytes(data))
-            return
-
-        # Non-audio events (Metadata, Flushed, Warning, etc.)
-        try:
-            logging.info(f"[Deepgram WS] non-audio: {msg!r}")
-        except Exception:
-            logging.info("[Deepgram WS] non-audio (unprintable)")
+            q.put_nowait(bytes(data)); return
+        logging.info(f"[Deepgram WS] non-audio: {msg!r}")
 
     with dg.speak.v1.connect(
-        model=DEEPGRAM_TTS_VOICE,          # e.g. "aura-2-thalia-en" or "aura-2-hyperion-en"
-        encoding=DEEPGRAM_STREAM_ENCODING, # "linear16" | "mulaw" | "alaw"
-        sample_rate=DEEPGRAM_SAMPLE_RATE   # try 24000 first; 48000 also supported
+        model=DEEPGRAM_TTS_VOICE,
+        encoding=DEEPGRAM_STREAM_ENCODING,
+        sample_rate=DEEPGRAM_SAMPLE_RATE,
     ) as ws:
         ws.on(EventType.OPEN,   lambda _: logging.info("[Deepgram WS] OPEN"))
         ws.on(EventType.MESSAGE, on_message)
         ws.on(EventType.CLOSE,  lambda _: (closed.update({"flag": True}), logging.info("[Deepgram WS] CLOSE")))
         ws.on(EventType.ERROR,  lambda e: logging.error(f"[Deepgram WS] ERROR: {e}"))
-
-        # Start receiving frames/events
         ws.start_listening()
 
-        async def sender() -> None:
-            try:
-                for sentence in sentences:
-                    clean = sanitize_for_tts(sentence).strip()
-                    if not clean:
-                        continue
-                    # Send messages as plain dicts (matches docs and avoids SDK type quirks)
-                    ws.send_text({"type": "Text", "text": clean})
-                    logging.info(f"[Deepgram WS] SENT Text: {clean[:120]!r}")
-                    ws.send_control({"type": "Flush"})
-                    logging.info("[Deepgram WS] SENT Flush")
-                    await asyncio.sleep(0)  # yield to event loop so frames can arrive
-            finally:
-                ws.send_control({"type": "Close"})
-                logging.info("[Deepgram WS] SENT Close")
+        send_task = asyncio.create_task(_send_chunks_via_ws(ws, sentences))
 
-        send_task = asyncio.create_task(sender())
-
-        # Drain frames until closed & idle briefly
-        last = time.perf_counter()
-        total = 0
+        last = time.perf_counter(); total = 0
         while True:
             try:
                 frame = await asyncio.wait_for(q.get(), timeout=0.8)
@@ -397,7 +433,6 @@ async def stream_deepgram_tts(sentences: Iterable[str]) -> AsyncIterator[bytes]:
                 if closed["flag"] and (time.perf_counter() - last) > 0.8:
                     break
 
-        # cleanup sender if still running
         if not send_task.done():
             send_task.cancel()
             with contextlib.suppress(Exception):
@@ -405,6 +440,118 @@ async def stream_deepgram_tts(sentences: Iterable[str]) -> AsyncIterator[bytes]:
 
     if not saw_audio["flag"]:
         logging.warning("[Deepgram WS] no audio frames were received")
+
+# ---------- Deepgram TTS – Raw WebSocket pipeline (no SDK) ----------
+async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[bytes]:
+    try:
+        import websockets  # type: ignore
+    except Exception:
+        raise HTTPException(500, "Missing dependency 'websockets'. Install with: pip install websockets")
+
+    from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError  # type: ignore
+
+    url = (
+        f"wss://api.beta.deepgram.com/v1/speak?"
+        f"model={DEEPGRAM_TTS_VOICE}&encoding={DEEPGRAM_STREAM_ENCODING}&sample_rate={DEEPGRAM_SAMPLE_RATE}"
+    )
+    headers = [("Authorization", f"Token {DEEPGRAM_API_KEY}")]
+
+    # Older websockets versions may not accept extra_headers and raise TypeError
+    try:
+        connect_ctx = websockets.connect(url, extra_headers=headers, max_size=None)  # type: ignore
+    except TypeError as e:
+        # Provide a clear remediation path
+        raise HTTPException(
+            500,
+            "Incompatible 'websockets' package: missing support for extra_headers. "
+            "Upgrade with: pip install -U websockets (>=12)."
+        ) from e
+
+    async with connect_ctx as ws:  # type: ignore
+        async def sender() -> None:
+            any_sent = False
+            FLUSH_CHARS = 220
+            FLUSH_MS = 650
+            last_flush = time.perf_counter()
+            pending_chars = 0
+            try:
+                if hasattr(sentences, "__aiter__"):
+                    async for sentence in sentences:  # type: ignore[attr-defined]
+                        clean = sanitize_for_tts(str(sentence)).strip()
+                        if not clean:
+                            continue
+                        await ws.send(json.dumps({"type": "Speak", "text": clean}))
+                        logging.info(f"[Deepgram WS raw] SENT Speak: {clean[:120]!r}")
+                        any_sent = True
+                        pending_chars += len(clean)
+                        now = time.perf_counter()
+                        if pending_chars >= FLUSH_CHARS or (now - last_flush) * 1000.0 >= FLUSH_MS:
+                            await ws.send(json.dumps({"type": "Flush"}))
+                            logging.info("[Deepgram WS raw] SENT Flush")
+                            pending_chars = 0
+                            last_flush = now
+                        await asyncio.sleep(0)
+                else:
+                    for sentence in sentences:  # type: ignore[assignment]
+                        clean = sanitize_for_tts(str(sentence)).strip()
+                        if not clean:
+                            continue
+                        await ws.send(json.dumps({"type": "Speak", "text": clean}))
+                        logging.info(f"[Deepgram WS raw] SENT Speak: {clean[:120]!r}")
+                        any_sent = True
+                        pending_chars += len(clean)
+                        now = time.perf_counter()
+                        if pending_chars >= FLUSH_CHARS or (now - last_flush) * 1000.0 >= FLUSH_MS:
+                            await ws.send(json.dumps({"type": "Flush"}))
+                            logging.info("[Deepgram WS raw] SENT Flush")
+                            pending_chars = 0
+                            last_flush = now
+                        await asyncio.sleep(0)
+                # No final Flush necessary since we flush per chunk
+            except Exception:
+                pass
+        
+        send_task = asyncio.create_task(sender())
+
+        # Idle-cutoff: after sender finishes and no audio for ~1s, end
+        last_audio = time.perf_counter()
+        try:
+            while True:
+                try:
+                    msg = await asyncio.wait_for(ws.recv(), timeout=1.2)
+                except asyncio.TimeoutError:
+                    if send_task.done() and (time.perf_counter() - last_audio) > 1.0:
+                        break
+                    continue
+                except ConnectionClosedOK:
+                    break
+                except ConnectionClosedError:
+                    break
+
+                if isinstance(msg, (bytes, bytearray)):
+                    last_audio = time.perf_counter()
+                    yield bytes(msg)
+                else:
+                    try:
+                        logging.info(f"[Deepgram WS raw] text: {msg}")
+                    except Exception:
+                        pass
+        finally:
+            # Final flush after last chunk if any pending
+            with contextlib.suppress(Exception):
+                await ws.send(json.dumps({"type": "Flush"}))
+                logging.info("[Deepgram WS raw] SENT Flush (final)")
+            # Ask the server to close the stream
+            with contextlib.suppress(Exception):
+                await ws.send(json.dumps({"type": "Close"}))
+                logging.info("[Deepgram WS raw] SENT Close")
+            # Also close client side so recv() unblocks on some servers
+            with contextlib.suppress(Exception):
+                await ws.close()
+            if not send_task.done():
+                send_task.cancel()
+                with contextlib.suppress(Exception):
+                    await send_task
 
 # ---------- Streaming endpoint: Text -> Claude(SSE) -> Deepgram TTS(WS) ----------
 @app.post("/type/stream")
@@ -414,16 +561,20 @@ def type_streaming(data: dict):
     if not question and data.get("difficulty"):
         question = load_question_by_difficulty(str(data.get("difficulty")))
     system = build_system_prompt_from_question(question)
+    # Allow starting by difficulty only; default the first user turn
     if not user_text:
-        raise HTTPException(400, "Field 'text' is required.")
+        if data.get("difficulty") or question:
+            user_text = "BEGIN INTERVIEW"
+        else:
+            raise HTTPException(400, "Field 'text' is required.")
 
     async def audio_iter():
         # 1) stream Claude tokens
         tokens = stream_claude_text(user_text, system_override=system)
         # 2) group into sentence-like chunks
         chunks = sentence_chunks(tokens)
-        # 3) stream TTS audio frames as they arrive
-        async for audio in stream_deepgram_tts(chunks):
+        # 3) stream TTS audio frames as they arrive (raw WS pipeline)
+        async for audio in stream_deepgram_tts_raw(chunks):
             yield audio
 
     # For WS TTS with linear16, we stream raw PCM frames.
@@ -517,8 +668,12 @@ def debug_claude_stream(data: dict):
     if not question and data.get("difficulty"):
         question = load_question_by_difficulty(str(data.get("difficulty")))
     system = build_system_prompt_from_question(question)
+    # Allow starting by difficulty only; default the first user turn
     if not user_text:
-        raise HTTPException(400, "Field 'text' is required.")
+        if data.get("difficulty") or question:
+            user_text = "BEGIN INTERVIEW"
+        else:
+            raise HTTPException(400, "Field 'text' is required.")
 
     def iter_text():
         for piece in stream_claude_text(user_text, system_override=system):
@@ -526,6 +681,91 @@ def debug_claude_stream(data: dict):
             yield piece
 
     return StreamingResponse(iter_text(), media_type="text/plain; charset=utf-8")
+
+@app.get("/debug/tts-direct")
+async def debug_tts_direct():
+    async def audio_iter():
+        async def one():
+            yield "This is a direct Speak test."
+        async for b in stream_deepgram_tts(one()):
+            yield b
+    return StreamingResponse(
+        audio_iter(),
+        media_type=f"audio/L16; rate={DEEPGRAM_SAMPLE_RATE}; channels=1",
+    )
+
+@app.get("/debug/tts-raw")
+async def debug_tts_raw():
+    """
+    Deepgram WS minimal test (no Claude, no helpers).
+    Sends one Speak -> Flush -> Close and streams raw PCM bytes back.
+    """
+    import json, asyncio, time, logging
+    from fastapi.responses import StreamingResponse
+    from deepgram.core.events import EventType
+
+    q: asyncio.Queue[bytes] = asyncio.Queue()
+    closed = {"flag": False}
+
+    def on_message(msg):
+        # Raw audio bytes
+        if isinstance(msg, (bytes, bytearray)):
+            q.put_nowait(bytes(msg)); return
+
+        # Some SDKs wrap frames as typed "Audio" events
+        mtype = getattr(msg, "type", None) or getattr(msg, "_type", None)
+        data  = getattr(msg, "data", None)
+        if str(mtype).lower() == "audio" and isinstance(data, (bytes, bytearray)):
+            q.put_nowait(bytes(data)); return
+
+        # Log any JSON/control events (Metadata/Warning/Error/Flushed/etc.)
+        logging.info(f"[Deepgram WS] non-audio: {msg!r}")
+
+    def open_ws():
+        return dg.speak.v1.connect(
+            model=DEEPGRAM_TTS_VOICE,
+            encoding=DEEPGRAM_STREAM_ENCODING,
+            sample_rate=DEEPGRAM_SAMPLE_RATE,
+        )
+
+    async def audio_iter():
+        nonlocal q, closed
+        with open_ws() as ws:
+            ws.on(EventType.OPEN,   lambda _: logging.info("[Deepgram WS] OPEN"))
+            ws.on(EventType.MESSAGE, on_message)
+            ws.on(EventType.CLOSE,  lambda _: (closed.update({"flag": True}), logging.info("[Deepgram WS] CLOSE")))
+            ws.on(EventType.ERROR,  lambda e: logging.error(f"[Deepgram WS] ERROR: {e}"))
+            ws.start_listening()
+
+            # === Send exactly what the Deepgram sample uses ===
+            speak_payload = json.dumps({"type": "Speak", "text": "This is a direct Speak test."})
+            ws.send_text(speak_payload)
+            logging.info(f"[Deepgram WS] SENT Speak: {speak_payload}")
+
+            ws.send_text(json.dumps({"type": "Flush"}))
+            logging.info("[Deepgram WS] SENT Flush")
+
+            # tiny pause is fine; socket stays open while we drain frames
+            await asyncio.sleep(0.05)
+
+            ws.send_text(json.dumps({"type": "Close"}))
+            logging.info("[Deepgram WS] SENT Close")
+
+            # Drain frames until CLOSE + short idle
+            last = time.perf_counter()
+            while True:
+                try:
+                    frame = await asyncio.wait_for(q.get(), timeout=0.8)
+                    yield frame
+                    last = time.perf_counter()
+                except asyncio.TimeoutError:
+                    if closed["flag"] and (time.perf_counter() - last) > 0.8:
+                        break
+
+    return StreamingResponse(
+        audio_iter(),
+        media_type=f"audio/L16; rate={DEEPGRAM_SAMPLE_RATE}; channels=1",
+    )
 
 # ---------- Non-streaming endpoint for comparison ----------
 @app.post("/type")
@@ -541,7 +781,10 @@ async def type_to_voice(request: Request):
         question = load_question_by_difficulty(str(data.get("difficulty")))
     system = build_system_prompt_from_question(question)
     if not user_text:
-        raise HTTPException(400, "Field 'text' is required.")
+        if data.get("difficulty") or question:
+            user_text = "BEGIN INTERVIEW"
+        else:
+            raise HTTPException(400, "Field 'text' is required.")
 
     # Get complete text (non-streaming)
     msg = anthropic_client.messages.create(
@@ -589,6 +832,32 @@ async def type_to_voice(request: Request):
 def health():
     return {"ok": True}
 
+# ---------- FE helper: audio config ----------
+@app.get("/audio/config")
+def audio_config():
+    return {
+        "encoding": DEEPGRAM_STREAM_ENCODING,
+        "sample_rate": DEEPGRAM_SAMPLE_RATE,
+        "channels": 1,
+        "content_type": f"audio/L16; rate={DEEPGRAM_SAMPLE_RATE}; channels=1",
+    }
+
+# ---------- Route aliases under /api prefix (to match FE proxy) ----------
+# These mirror existing endpoints so the frontend can call /api/*
+app.add_api_route("/api/health", health, methods=["GET"])
+app.add_api_route("/api/audio/config", audio_config, methods=["GET"])
+
+# Core streaming endpoints
+app.add_api_route("/api/input/stream", input_stream, methods=["POST"])
+app.add_api_route("/api/type/stream", type_streaming, methods=["POST"])
+app.add_api_route("/api/type", type_to_voice, methods=["POST"])
+
+# Debug helpers
+app.add_api_route("/api/debug/claude/stream", debug_claude_stream, methods=["POST"])
+app.add_api_route("/api/debug/tts", debug_tts, methods=["GET"])
+app.add_api_route("/api/debug/tts-min", debug_tts_min, methods=["GET"])
+app.add_api_route("/api/eval/parse", eval_parse, methods=["POST"])
+
 # ---------- Utility endpoint: parse evaluation scores ----------
 @app.post("/eval/parse")
 async def eval_parse(request: Request):
@@ -597,3 +866,72 @@ async def eval_parse(request: Request):
     if not text:
         raise HTTPException(400, "Field 'text' is required.")
     return {"scores": parse_evaluation_scores(text)}
+
+# ---------- Deepgram STT (prerecorded) minimal helper ----------
+async def transcribe_prerecorded_deepgram(audio_bytes: bytes, content_type: str = "audio/wav") -> str:
+    headers = {
+        "Authorization": f"Token {DEEPGRAM_API_KEY}",
+        "Content-Type": content_type,
+    }
+    params = {"model": (os.getenv("DEEPGRAM_STT_MODEL") or "nova-3")}
+    url = "https://api.deepgram.com/v1/listen"
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(url, params=params, headers=headers, content=audio_bytes)
+        r.raise_for_status()
+        data = r.json()
+    try:
+        return data["results"]["channels"][0]["alternatives"][0]["transcript"]
+    except Exception:
+        logging.error(f"Unexpected Deepgram STT response: {data}")
+        raise HTTPException(500, "STT failed to return transcript")
+
+# ---------- Unified input: text or voice -> Claude -> Deepgram TTS ----------
+@app.post("/input/stream")
+def input_stream(payload: dict = Body(...)):
+    """
+    Unified entry. Body supports either:
+      - {"mode":"text", "text":"...", "difficulty":"easy"}
+      - {"mode":"voice", "audio_b64":"...", "mime":"audio/wav", "difficulty":"easy"}
+    Optional: "question" object instead of difficulty.
+    Streams audio PCM from Deepgram TTS.
+    """
+    mode = (payload.get("mode") or "text").strip().lower()
+    question = payload.get("question")
+    if not question and payload.get("difficulty"):
+        question = load_question_by_difficulty(str(payload.get("difficulty")))
+    system = build_system_prompt_from_question(question)
+
+    async def audio_iter():
+        # Resolve the initial user_text based on mode
+        user_text: str
+        if mode == "voice":
+            b64 = payload.get("audio_b64")
+            if not b64:
+                raise HTTPException(400, "audio_b64 required for voice mode")
+            try:
+                audio_bytes = base64.b64decode(b64)
+            except Exception:
+                raise HTTPException(400, "audio_b64 is invalid base64")
+            mime = (payload.get("mime") or "audio/wav").strip() or "audio/wav"
+            # Transcribe via Deepgram prerecorded API
+            user_text = await transcribe_prerecorded_deepgram(audio_bytes, content_type=mime)
+            if not user_text:
+                raise HTTPException(400, "Transcription returned empty text")
+        else:
+            user_text = (payload.get("text") or "").strip()
+            if not user_text:
+                # default starter when only difficulty/question supplied
+                user_text = "BEGIN INTERVIEW"
+
+        # Claude tokens
+        tokens = stream_claude_text(user_text, system_override=system)
+        chunks = sentence_chunks(tokens)
+        async for audio in stream_deepgram_tts_raw(chunks):
+            yield audio
+
+    return StreamingResponse(
+        audio_iter(),
+        media_type=f"audio/L16; rate={DEEPGRAM_SAMPLE_RATE}; channels=1",
+    )
+
+

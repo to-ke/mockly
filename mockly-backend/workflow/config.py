@@ -28,3 +28,7 @@ DEEPGRAM_SAMPLE_RATE    = int(_opt("DEEPGRAM_SAMPLE_RATE", "48000"))
 
 # (Optional) STT model if/when you add streaming STT later
 DEEPGRAM_STT_MODEL  = _opt("DEEPGRAM_STT_MODEL", "nova-3")
+
+# CORS (frontend dev) – comma-separated list or "*"
+_cors = _opt("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:5173")
+CORS_ALLOW_ORIGINS = [o.strip() for o in _cors.split(",") if o.strip()] or ["*"]
