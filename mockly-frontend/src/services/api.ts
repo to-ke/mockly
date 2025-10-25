@@ -1,4 +1,4 @@
-import type { ExecuteRequest, ExecuteResponse } from '@/types/api'
+import type { ExecuteRequest, ExecuteResponse, QuestionResponse } from '@/types/api'
 import type { Difficulty, FeedbackReport } from '@/stores/app'
 
 interface WebRtcOfferPayload {
@@ -59,13 +59,15 @@ export const Api = {
         }
         return res.json() as Promise<ExecuteResponse>
     },
-    async fetchQuestion(payload: { difficulty: Difficulty }) {
+    async fetchQuestion(payload: { difficulty: Difficulty; language?: string }): Promise<QuestionResponse> {
         if (useMock) {
             await new Promise((resolve) => setTimeout(resolve, 400))
             return {
                 id: `mock-${payload.difficulty}`,
                 difficulty: payload.difficulty,
                 prompt: `Mock ${payload.difficulty} question will appear here.`,
+                starter_code: 'def solution():\n    # Your code here\n    pass',
+                language: payload.language || 'python',
             }
         }
 
@@ -78,7 +80,7 @@ export const Api = {
             const text = await res.text()
             throw new Error(text || res.statusText)
         }
-        return res.json()
+        return res.json() as Promise<QuestionResponse>
     },
     async fetchFeedback(): Promise<FeedbackReport> {
         if (useMock) {
