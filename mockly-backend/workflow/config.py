@@ -12,14 +12,19 @@ def _req(name: str) -> str:
     return v
 
 def _opt(name: str, default: str = "") -> str:
-    return os.getenv(name, default)
+    return os.getenv(name, default) 
 
-# required secrets
-ANTHROPIC_API_KEY = _req("ANTHROPIC_API_KEY")
-DEEPGRAM_API_KEY  = _req("DEEPGRAM_API_KEY")
+# Required secrets
+ANTHROPIC_API_KEY   = _req("ANTHROPIC_API_KEY")
+DEEPGRAM_API_KEY    = _req("DEEPGRAM_API_KEY")
 
-# model/voice defaults
+# Claude config
 ANTHROPIC_MODEL     = _opt("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
-DEEPGRAM_TTS_VOICE  = _opt("DEEPGRAM_TTS_VOICE", "aura-asteria-en")
-DEEPGRAM_TTS_FORMAT = _opt("DEEPGRAM_TTS_FORMAT", "mp3")   # per docs, default is mp3
+
+# Deepgram TTS WS config
+DEEPGRAM_TTS_VOICE      = _opt("DEEPGRAM_TTS_VOICE", "aura-2-thalia-en")
+DEEPGRAM_STREAM_ENCODING= _opt("DEEPGRAM_STREAM_ENCODING", "linear16")   # linear16|mulaw|alaw
+DEEPGRAM_SAMPLE_RATE    = int(_opt("DEEPGRAM_SAMPLE_RATE", "48000"))
+
+# (Optional) STT model if/when you add streaming STT later
 DEEPGRAM_STT_MODEL  = _opt("DEEPGRAM_STT_MODEL", "nova-3")
