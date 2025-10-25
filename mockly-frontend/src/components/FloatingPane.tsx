@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, Mic, MicOff, Send } from 'lucide-react'
 import { Button } from '@/components/Button'
 import { cn } from '@/lib/cn'
-import floatingImage from '@/assets/react.svg'
 import { AudioStreamer } from '@/services/audioStreamer'
+import floatingImage from '@/assets/react.svg'
 
 
 type ChatMessage = {
@@ -38,9 +38,16 @@ export function FloatingPane() {
     const chatBodyRef = useRef<HTMLDivElement | null>(null)
     const pendingReplyTimeouts = useRef<number[]>([])
     const audioStreamerRef = useRef<AudioStreamer | null>(null)
-    const [muted, setMuted] = useState(true)
-    const [audioBusy, setAudioBusy] = useState(false)
-    const [audioError, setAudioError] = useState<string | null>(null)
+    const [micMuted, setMicMuted] = useState(true)
+    const [micBusy, setMicBusy] = useState(false)
+    const [micError, setMicError] = useState<string | null>(null)
+    const [headError, setHeadError] = useState<string | null>(null)
+    const ensureAudioStreamer = useCallback(() => {
+        if (!audioStreamerRef.current) {
+            audioStreamerRef.current = new AudioStreamer()
+        }
+        return audioStreamerRef.current
+    }, [])
 
 
     const handlePointerMove = useCallback((event: PointerEvent) => {
@@ -81,16 +88,11 @@ export function FloatingPane() {
 
 
     useEffect(() => {
-        audioStreamerRef.current = new AudioStreamer()
         return () => {
             window.removeEventListener('pointermove', handlePointerMove)
             window.removeEventListener('pointerup', handlePointerUp)
             pendingReplyTimeouts.current.forEach((timeoutId) => window.clearTimeout(timeoutId))
             pendingReplyTimeouts.current = []
-            audioStreamerRef.current?.stop().catch((error) => {
-                console.warn('Failed to stop audio streamer on unmount', error)
-            })
-            audioStreamerRef.current = null
         }
     }, [handlePointerMove, handlePointerUp])
 
@@ -132,37 +134,68 @@ export function FloatingPane() {
     }
 
 
-    const ensureAudioStreamer = () => {
-        if (!audioStreamerRef.current) {
-            audioStreamerRef.current = new AudioStreamer()
+    useEffect(() => {
+        let cancelled = false
+        const streamer = ensureAudioStreamer()
+        setMicBusy(true)
+        streamer
+            .warmup({ muted: true })
+            .then(() => {
+                if (!cancelled) {
+                    setMicMuted(true)
+                }
+            })
+            .catch((error) => {
+                if (cancelled) return
+                const message = error instanceof Error ? error.message : 'Unable to access the microphone.'
+                setMicError(message)
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setMicBusy(false)
+                }
+            })
+        return () => {
+            cancelled = true
+            audioStreamerRef.current
+                ?.stop()
+                .catch((error) => console.warn('Failed to stop audio streamer on unmount', error))
+            audioStreamerRef.current = null
         }
-        return audioStreamerRef.current
-    }
+    }, [ensureAudioStreamer])
 
 
+    useEffect(() => {
+        let cancelled = false
+        let rafId: number | null = null
     const handleToggleMute = async (event?: React.MouseEvent) => {
         event?.stopPropagation()
-        setAudioError(null)
-        setAudioBusy(true)
+        setMicError(null)
+        setMicBusy(true)
         try {
-            if (muted) {
-                await ensureAudioStreamer().start()
-                setMuted(false)
+            if (micMuted) {
+                await ensureAudioStreamer().setMuted(false)
+                setMicMuted(false)
             } else {
-                await audioStreamerRef.current?.stop()
-                setMuted(true)
+                await audioStreamerRef.current?.setMuted(true)
+                setMicMuted(true)
             }
         } catch (error) {
-            if (error instanceof Error) {
-                setAudioError(error.message)
-            } else {
-                setAudioError(String(error))
-            }
-            setMuted(true)
+            const message = error instanceof Error ? error.message : 'Unable to toggle the microphone.'
+            setMicError(message)
+            setMicMuted(true)
         } finally {
-            setAudioBusy(false)
+            setMicBusy(false)
         }
     }
+
+
+    const handleHeadError = useCallback((message: string | null) => {
+        setHeadError(message ?? null)
+    }, [])
+
+
+    const statusMessage = micError
 
 
     return (
@@ -183,19 +216,19 @@ export function FloatingPane() {
                 <span className="text-sm font-semibold text-foreground">Kevin (Interviewer)</span>
                 <div className="flex items-center gap-2">
                     <Button
-                        variant={muted ? 'outline' : 'default'}
+                        variant={micMuted ? 'outline' : 'default'}
                         size="sm"
                         className="h-8 px-3 text-xs"
                         onClick={handleToggleMute}
-                        disabled={audioBusy}
+                        disabled={micBusy}
                     >
-                        {muted ? (
+                        {micMuted ? (
                             <>
-                                <MicOff className="mr-2 h-4 w-4" /> Unmute
+                                <MicOff className="mr-2 h-4 w-4" /> Enable Mic
                             </>
                         ) : (
                             <>
-                                <Mic className="mr-2 h-4 w-4" /> Mute
+                                <Mic className="mr-2 h-4 w-4" /> Mute Mic
                             </>
                         )}
                     </Button>
@@ -213,9 +246,9 @@ export function FloatingPane() {
                 </div>
             </div>
 
-            {audioError && (
+            {statusMessage && (
                 <div className="border-b border-destructive/30 bg-destructive/10 px-3 py-1 text-xs text-destructive">
-                    {audioError}
+                    {statusMessage}
                 </div>
             )}
 

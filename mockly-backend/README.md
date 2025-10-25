@@ -84,7 +84,7 @@ Supported languages: `python`, `javascript`, `typescript`, `cpp`, `java`. Each r
 If the required toolchain is missing the handler returns an error message and `exitCode: 1`.
 
 ### `/api/webrtc/*`
-Placeholder signaling store backed by in-memory dicts (`routes_webrtc.py`). Replace this with a real media server/aiortc integration for production use.
+Backed by `aiortc` so the server can accept the browser’s audio track, consume frames, and track simple stats. Hit `GET /api/webrtc/session/{id}` to see the last audio timestamp and frame count for a session. Replace this mock signaling path with a full media server for production workloads.
 
 ## Development tips
 - Run backend first (`uvicorn app.main:app --reload`) before starting the frontend. Vite proxies `/api` to `localhost:8000`.

@@ -67,6 +67,7 @@ The Vite dev server runs on `http://localhost:5173` and proxies `/api` to the ba
 | `/api/webrtc/offer` | POST | Create a signaling session (placeholder echo implementation). |
 | `/api/webrtc/candidate` | POST | Push ICE candidates into the session store. |
 | `/api/webrtc/session/{id}` | DELETE | Close an in-memory signaling session. |
+| `/api/webrtc/session/{id}` | GET | Inspect connection stats (audio frame count, last activity). |
 
 ## Development workflow
 1. Start the FastAPI server (`uvicorn app.main:app --reload`).
