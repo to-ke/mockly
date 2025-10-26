@@ -28,7 +28,7 @@ from .transcription import (
 )
 from .tts import stream_deepgram_tts, stream_deepgram_tts_raw
 
-router = APIRouter(tags=["workflow"])
+router = APIRouter(prefix="/workflow", tags=["workflow"])
 
 
 def _resolve_question(payload: dict) -> dict | None:
@@ -55,16 +55,69 @@ def _stream_media_response(generator: AsyncIterator[bytes]):
 
 
 @router.post("/type/stream")
-def type_streaming(payload: dict = Body(...)):
+async def type_streaming(payload: dict = Body(...)):
+    import time
+    start_time = time.perf_counter()
+    
     question = _resolve_question(payload)
     system = build_system_prompt_from_question(question)
     user_text = _resolve_user_text(payload, question)
+    
+    logging.info(f"[/type/stream] Starting TTS stream for text: {user_text[:50]}...")
+    logging.info(f"[/type/stream] System prompt length: {len(system)} chars")
 
     async def audio_iter():
-        tokens = stream_claude_text(user_text, system_override=system)
-        chunks = sentence_chunks(tokens)
-        async for audio in stream_deepgram_tts_raw(chunks):
-            yield audio
+        try:
+            # Step 1: Fully generate Claude's response first
+            claude_start = time.perf_counter()
+            tokens = stream_claude_text(user_text, system_override=system)
+            logging.info(f"[/type/stream] Claude stream initiated after {(time.perf_counter() - claude_start)*1000:.1f}ms")
+            
+            # Collect ALL tokens from Claude first
+            all_tokens = []
+            for token in tokens:
+                all_tokens.append(token)
+            
+            full_text = "".join(all_tokens)
+            claude_elapsed = time.perf_counter() - claude_start
+            logging.info(f"[/type/stream] Claude finished in {claude_elapsed:.2f}s, generated {len(full_text)} characters")
+            logging.info(f"\n{'='*80}\n[CLAUDE FULL RESPONSE]\n{'='*80}\n{full_text}\n{'='*80}")
+            
+            # Step 2: Convert full text to sentences
+            sentence_start = time.perf_counter()
+            
+            # Split full text into sentences for TTS
+            all_sentences = []
+            for sentence in sentence_chunks(iter(all_tokens)):
+                all_sentences.append(sentence)
+            
+            logging.info(f"[/type/stream] Generated {len(all_sentences)} sentences in {(time.perf_counter() - sentence_start)*1000:.1f}ms")
+            for i, sentence in enumerate(all_sentences, 1):
+                logging.info(f"[/type/stream] Sentence {i}: {sentence[:100]}...")
+            
+            # Step 3: Stream sentences to Deepgram TTS
+            tts_start = time.perf_counter()
+            total_bytes = 0
+            first_audio = True
+            
+            async for audio in stream_deepgram_tts_raw(iter(all_sentences)):
+                if first_audio:
+                    logging.info(f"[/type/stream] First audio chunk after {(time.perf_counter() - start_time)*1000:.1f}ms from start")
+                    logging.info(f"[/type/stream] Time from Claude completion to first audio: {(time.perf_counter() - claude_start - claude_elapsed)*1000:.1f}ms")
+                    first_audio = False
+                total_bytes += len(audio)
+                yield audio
+            
+            elapsed = time.perf_counter() - start_time
+            logging.info(f"[/type/stream] Total time: {elapsed:.2f}s")
+            logging.info(f"[/type/stream] Claude: {claude_elapsed:.2f}s, TTS: {(time.perf_counter() - tts_start):.2f}s")
+            logging.info(f"[/type/stream] Total audio bytes: {total_bytes}")
+            
+            if total_bytes == 0:
+                logging.warning("[/type/stream] No audio generated!")
+        except Exception as exc:
+            logging.error(f"[/type/stream] Error in audio generation: {exc}", exc_info=True)
+            raise
 
     return _stream_media_response(audio_iter())
 
@@ -238,7 +291,7 @@ async def type_to_voice(request: Request):
         model=ANTHROPIC_MODEL,
         system=system,
         messages=[{"role": "user", "content": user_text}],
-        max_tokens=800,
+        max_tokens=8192,  # Maximum allowed by Claude Sonnet
     )
     full_text = "".join(
         block.text for block in message.content if getattr(block, "type", "") == "text"
@@ -364,3 +417,52 @@ async def stt_prerecorded_detailed(payload: dict = Body(...)):
         raise HTTPException(500, str(exc)) from exc
 
     return {"results": results}
+
+
+@router.get("/captions/live")
+async def get_live_captions():
+    """
+    Serve live TTS transcription with word-level timestamps for avatar lipsync.
+    Uses Deepgram STT to get precise word timing from generated audio.
+    """
+    import os
+    from datetime import datetime
+    from .config import LIVE_TRANSCRIPTION_PATH
+    
+    if not LIVE_TRANSCRIPTION_PATH or not os.path.exists(LIVE_TRANSCRIPTION_PATH):
+        return {"words": [], "status": "no_data", "last_updated": time.time()}
+    
+    try:
+        with open(LIVE_TRANSCRIPTION_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # LiveTranscriptionWriter format:
+        # {"transcription": [{"word": "...", "start_time": 0.0, "end_time": 0.3}], ...}
+        words = data.get("transcription", [])
+        
+        # Convert ISO timestamp to unix timestamp if needed
+        last_updated_str = data.get("last_updated", "")
+        try:
+            if last_updated_str:
+                dt = datetime.fromisoformat(last_updated_str.replace('Z', '+00:00'))
+                last_updated = dt.timestamp()
+            else:
+                last_updated = time.time()
+        except Exception:
+            last_updated = time.time()
+        
+        return {
+            "words": words,
+            "status": "active" if words else "no_data",
+            "last_updated": last_updated,
+            "word_count": len(words),
+        }
+    
+    except FileNotFoundError:
+        return {"words": [], "status": "no_data", "last_updated": time.time()}
+    except json.JSONDecodeError as exc:
+        logging.error(f"[/captions/live] Invalid JSON in transcription file: {exc}")
+        return {"words": [], "status": "error", "error": "Invalid JSON", "last_updated": time.time()}
+    except Exception as exc:
+        logging.error(f"[/captions/live] Failed to read transcription: {exc}")
+        return {"words": [], "status": "error", "error": str(exc), "last_updated": time.time()}

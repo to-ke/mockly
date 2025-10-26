@@ -1,10 +1,10 @@
-import type { ExecuteRequest, ExecuteResponse, QuestionResponse } from '@/types/api'
+import type { ExecuteRequest, ExecuteResponse, QuestionResponse, CaptionDataResponse } from '@/types/api'
 import type { Difficulty, FeedbackReport } from '@/stores/app'
 
 // Prefer talking directly to the backend in the browser to avoid
 // proxy flakiness when the Vite dev server restarts. Fall back to the
 // Vite proxy path ("/api") if we cannot infer a backend origin.
-function resolveApiBase(): string {
+export function resolveApiBase(): string {
     // Explicit override first
     const explicit = (import.meta as any).env?.VITE_BACKEND_ORIGIN as string | undefined
     if (explicit && /^https?:\/\//i.test(explicit)) {
@@ -24,6 +24,12 @@ function resolveApiBase(): string {
 
     // Fallback to proxy path; Vite will forward to backend if configured
     return '/api'
+}
+
+// Resolve API base without /api suffix for direct backend access
+export function resolveBackendBase(): string {
+    const apiBase = resolveApiBase()
+    return apiBase.replace(/\/api$/, '')
 }
 
 const API_BASE = resolveApiBase()
@@ -168,5 +174,21 @@ export const Api = {
             const text = await res.text()
             throw new Error(text || res.statusText)
         }
+    },
+    async fetchCaptions(): Promise<CaptionDataResponse> {
+        if (useMock) {
+            return {
+                words: [],
+                status: 'no_data',
+                last_updated: Date.now(),
+            }
+        }
+
+        const res = await fetch(`${API_BASE}/workflow/captions/live`, { method: 'GET' })
+        if (!res.ok) {
+            const text = await res.text()
+            throw new Error(text || res.statusText)
+        }
+        return res.json() as Promise<CaptionDataResponse>
     },
 }

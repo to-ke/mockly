@@ -21,11 +21,21 @@ from .config import (
     DEEPGRAM_TTS_VOICE,
 )
 from .speech import sanitize_for_tts
-from .config import TTS_LIVE_JSON_PATH
+from .config import (
+    TTS_LIVE_JSON_PATH,
+    LIVE_TRANSCRIPTION_PATH,
+    LIVE_TRANSCRIPTION_UPDATE_INTERVAL,
+)
 from .captions import LiveTTSCapture
+from .live_transcription import LiveTranscriptionWriter
 
 
-async def _send_chunks_via_ws(ws, sentences, capture: LiveTTSCapture | None = None) -> None:
+async def _send_chunks_via_ws(
+    ws,
+    sentences,
+    capture: LiveTTSCapture | None = None,
+    transcription: LiveTranscriptionWriter | None = None,
+) -> None:
     """
     Send sanitized Speak messages over the Deepgram websocket, flushing
     periodically to keep latency low.
@@ -38,14 +48,14 @@ async def _send_chunks_via_ws(ws, sentences, capture: LiveTTSCapture | None = No
 
         if hasattr(sentences, "__aiter__"):
             async for sentence in sentences:  # type: ignore[attr-defined]
-                pending_chars = _send_sentence(ws, sentence, pending_chars, capture)
+                pending_chars = _send_sentence(ws, sentence, pending_chars, capture, transcription)
                 last_flush, pending_chars = _maybe_flush(
                     ws, pending_chars, last_flush, FLUSH_CHARS, FLUSH_MS, capture
                 )
                 await asyncio.sleep(0)
         else:
             for sentence in sentences:  # type: ignore
-                pending_chars = _send_sentence(ws, sentence, pending_chars, capture)
+                pending_chars = _send_sentence(ws, sentence, pending_chars, capture, transcription)
                 last_flush, pending_chars = _maybe_flush(
                     ws, pending_chars, last_flush, FLUSH_CHARS, FLUSH_MS, capture
                 )
@@ -59,9 +69,20 @@ async def _send_chunks_via_ws(ws, sentences, capture: LiveTTSCapture | None = No
             ws.send_text(json.dumps({"type": "Close"}))
         if capture:
             capture.close()
+        if transcription:
+            with contextlib.suppress(Exception):
+                await transcription.finalize()
+            transcription.close()
 
 
-def _send_sentence(ws, sentence, pending_chars: int, capture: LiveTTSCapture | None = None) -> int:
+def _send_sentence(
+    ws,
+    sentence,
+    pending_chars: int,
+    capture: LiveTTSCapture | None = None,
+    transcription: LiveTranscriptionWriter | None = None,
+) -> int:
+    """Send sentence via Deepgram SDK websocket (uses send_text method)"""
     clean = sanitize_for_tts(str(sentence)).strip()
     if not clean:
         return pending_chars
@@ -69,6 +90,31 @@ def _send_sentence(ws, sentence, pending_chars: int, capture: LiveTTSCapture | N
     logging.info("[Deepgram WS] SENT Speak: %r", clean[:120])
     if capture:
         capture.speak(clean)
+    if transcription:
+        transcription.add_text_chunk(clean)
+    return pending_chars + len(clean)
+
+
+async def _send_sentence_raw(
+    ws,
+    sentence,
+    pending_chars: int,
+    capture: LiveTTSCapture | None = None,
+    transcription: LiveTranscriptionWriter | None = None,
+) -> int:
+    """Send sentence via raw websockets library (uses send method)"""
+    send_start = time.perf_counter()
+    clean = sanitize_for_tts(str(sentence)).strip()
+    if not clean:
+        logging.info("[Deepgram WS raw] SKIP empty after sanitize: %r", sentence[:80])
+        return pending_chars
+    await ws.send(json.dumps({"type": "Speak", "text": clean}))
+    send_time = (time.perf_counter() - send_start) * 1000
+    logging.info("[Deepgram WS raw] SENT Speak (%d chars in %.1fms): %r", len(clean), send_time, clean[:120])
+    if capture:
+        capture.speak(clean)
+    if transcription:
+        transcription.add_text_chunk(clean)
     return pending_chars + len(clean)
 
 
@@ -80,10 +126,30 @@ def _maybe_flush(
     flush_ms: int,
     capture: LiveTTSCapture | None = None,
 ) -> tuple[float, int]:
+    """Maybe flush Deepgram SDK websocket (uses send_text method)"""
     now = time.perf_counter()
     if pending_chars >= flush_chars or (now - last_flush) * 1000.0 >= flush_ms:
         ws.send_text(json.dumps({"type": "Flush"}))
         logging.info("[Deepgram WS] SENT Flush")
+        if capture:
+            capture.flush()
+        return now, 0
+    return last_flush, pending_chars
+
+
+async def _maybe_flush_raw(
+    ws,
+    pending_chars: int,
+    last_flush: float,
+    flush_chars: int,
+    flush_ms: int,
+    capture: LiveTTSCapture | None = None,
+) -> tuple[float, int]:
+    """Maybe flush raw websockets (uses send method)"""
+    now = time.perf_counter()
+    if pending_chars >= flush_chars or (now - last_flush) * 1000.0 >= flush_ms:
+        await ws.send(json.dumps({"type": "Flush"}))
+        logging.info("[Deepgram WS raw] SENT Flush")
         if capture:
             capture.flush()
         return now, 0
@@ -100,6 +166,9 @@ async def stream_deepgram_tts(sentences) -> AsyncIterator[bytes]:
     closed = {"flag": False}
     saw_audio = {"flag": False}
     capture: LiveTTSCapture | None = None
+    transcription: LiveTranscriptionWriter | None = None
+    
+    # Initialize caption capture if configured
     if TTS_LIVE_JSON_PATH:
         try:
             capture = LiveTTSCapture(
@@ -110,6 +179,22 @@ async def stream_deepgram_tts(sentences) -> AsyncIterator[bytes]:
             )
         except Exception:
             capture = None
+    
+    # Initialize live transcription for word-level timestamps (needed for lip sync)
+    # Re-transcribing TTS audio gives us precise word timing from Deepgram STT
+    transcription = None
+    if LIVE_TRANSCRIPTION_PATH:
+        try:
+            transcription = LiveTranscriptionWriter(
+                LIVE_TRANSCRIPTION_PATH,
+                sample_rate=DEEPGRAM_SAMPLE_RATE,
+                encoding=str(DEEPGRAM_STREAM_ENCODING),
+                update_interval_seconds=LIVE_TRANSCRIPTION_UPDATE_INTERVAL,
+            )
+            logging.info("[Deepgram TTS] Live transcription enabled for lip sync")
+        except Exception as exc:
+            logging.error("[Deepgram TTS] Failed to init transcription: %s", exc)
+            transcription = None
 
     def on_message(msg):
         if isinstance(msg, (bytes, bytearray)):
@@ -140,22 +225,33 @@ async def stream_deepgram_tts(sentences) -> AsyncIterator[bytes]:
         ws.on(EventType.ERROR, lambda exc: logging.error("[Deepgram WS] ERROR: %s", exc))
         ws.start_listening()
 
-        send_task = asyncio.create_task(_send_chunks_via_ws(ws, sentences, capture))
+        send_task = asyncio.create_task(_send_chunks_via_ws(ws, sentences, capture, transcription))
 
         last_audio = time.perf_counter()
         total = 0
         while True:
             try:
-                frame = await asyncio.wait_for(queue.get(), timeout=0.8)
+                frame = await asyncio.wait_for(queue.get(), timeout=10.0)
                 total += len(frame)
+                duration_ms = _pcm_duration_ms(total, DEEPGRAM_SAMPLE_RATE)
+                
                 if capture and str(DEEPGRAM_STREAM_ENCODING).lower() == "linear16":
-                    capture.audio(len(frame), _pcm_duration_ms(total, DEEPGRAM_SAMPLE_RATE))
+                    capture.audio(len(frame), duration_ms)
+                
+                # Add audio to transcription buffer
+                if transcription and str(DEEPGRAM_STREAM_ENCODING).lower() == "linear16":
+                    transcription.add_audio_chunk(frame, _pcm_duration_ms(len(frame), DEEPGRAM_SAMPLE_RATE))
+                    # Periodically trigger transcription update
+                    await transcription.maybe_update()
+                
                 if total // 32768 != (total - len(frame)) // 32768:
                     logging.info("[Deepgram WS] audio %.1f KiB", total / 1024)
                 yield frame
                 last_audio = time.perf_counter()
             except asyncio.TimeoutError:
-                if closed["flag"] and (time.perf_counter() - last_audio) > 0.8:
+                # Only break if connection is closed AND no audio for 10 seconds
+                if closed["flag"] and (time.perf_counter() - last_audio) > 10.0:
+                    logging.info("[Deepgram WS] Stream ended after 10s idle")
                     break
 
         if not send_task.done():
@@ -181,17 +277,39 @@ async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[byt
         "wss://api.beta.deepgram.com/v1/speak?"
         f"model={DEEPGRAM_TTS_VOICE}&encoding={DEEPGRAM_STREAM_ENCODING}&sample_rate={DEEPGRAM_SAMPLE_RATE}"
     )
-    headers = [("Authorization", f"Token {DEEPGRAM_API_KEY}")]
+    
+    logging.info(f"[Deepgram TTS raw] Connecting to {url[:80]}...")
+    
+    # Build headers dict for websockets.connect()
+    # Use additional_headers instead of extra_headers for better compatibility
+    headers_dict = {"Authorization": f"Token {DEEPGRAM_API_KEY}"}
 
     try:
-        connect_ctx = websockets.connect(url, extra_headers=headers, max_size=None)  # type: ignore[arg-type]
-    except TypeError as exc:
-        raise RuntimeError(
-            "Incompatible 'websockets' package: missing support for extra_headers. "
-            "Upgrade with: pip install -U websockets (>=12)."
-        ) from exc
+        # Try with additional_headers first (websockets 12+)
+        connect_ctx = websockets.connect(
+            url, 
+            additional_headers=headers_dict,
+            max_size=None
+        )  # type: ignore[call-arg]
+    except TypeError:
+        try:
+            # Fallback to extra_headers for older versions
+            logging.info("[Deepgram TTS raw] Falling back to extra_headers parameter")
+            connect_ctx = websockets.connect(
+                url,
+                extra_headers=headers_dict,
+                max_size=None
+            )  # type: ignore[call-arg]
+        except TypeError as exc:
+            raise RuntimeError(
+                "Incompatible 'websockets' package. "
+                "Upgrade with: pip install -U 'websockets>=12.0'"
+            ) from exc
 
     capture: LiveTTSCapture | None = None
+    transcription: LiveTranscriptionWriter | None = None
+    
+    # Initialize caption capture if configured
     if TTS_LIVE_JSON_PATH:
         try:
             capture = LiveTTSCapture(
@@ -202,54 +320,120 @@ async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[byt
             )
         except Exception:
             capture = None
+    
+    # Initialize live transcription for word-level timestamps (needed for lip sync)
+    # Re-transcribing TTS audio gives us precise word timing from Deepgram STT
+    transcription = None
+    if LIVE_TRANSCRIPTION_PATH:
+        try:
+            transcription = LiveTranscriptionWriter(
+                LIVE_TRANSCRIPTION_PATH,
+                sample_rate=DEEPGRAM_SAMPLE_RATE,
+                encoding=str(DEEPGRAM_STREAM_ENCODING),
+                update_interval_seconds=LIVE_TRANSCRIPTION_UPDATE_INTERVAL,
+            )
+            logging.info("[Deepgram TTS raw] Live transcription enabled for lip sync")
+        except Exception as exc:
+            logging.error("[Deepgram TTS raw] Failed to init transcription: %s", exc)
+            transcription = None
 
     async with connect_ctx as ws:  # type: ignore
+        logging.info("[Deepgram TTS raw] WebSocket connected successfully")
+        
         async def sender() -> None:
             FLUSH_CHARS = 220
             FLUSH_MS = 650
             last_flush = time.perf_counter()
             pending_chars = 0
+            sentence_count = 0
             try:
                 if hasattr(sentences, "__aiter__"):
                     async for sentence in sentences:  # type: ignore[attr-defined]
-                        pending_chars = _send_sentence(ws, sentence, pending_chars, capture)
-                        last_flush, pending_chars = _maybe_flush(
+                        sentence_count += 1
+                        logging.info(f"[Deepgram TTS raw] Processing sentence {sentence_count}: {sentence[:80]}...")
+                        pending_chars = await _send_sentence_raw(ws, sentence, pending_chars, capture, transcription)
+                        last_flush, pending_chars = await _maybe_flush_raw(
                             ws, pending_chars, last_flush, FLUSH_CHARS, FLUSH_MS, capture
                         )
                         await asyncio.sleep(0)
                 else:
                     for sentence in sentences:  # type: ignore
-                        pending_chars = _send_sentence(ws, sentence, pending_chars, capture)
-                        last_flush, pending_chars = _maybe_flush(
+                        sentence_count += 1
+                        logging.info(f"[Deepgram TTS raw] Processing sentence {sentence_count}: {sentence[:80]}...")
+                        pending_chars = await _send_sentence_raw(ws, sentence, pending_chars, capture, transcription)
+                        last_flush, pending_chars = await _maybe_flush_raw(
                             ws, pending_chars, last_flush, FLUSH_CHARS, FLUSH_MS, capture
                         )
                         await asyncio.sleep(0)
-            except Exception:
-                pass
+                
+                # Final flush to ensure all text is sent
+                if pending_chars > 0:
+                    logging.info(f"[Deepgram TTS raw] Final flush with {pending_chars} pending chars")
+                    await ws.send(json.dumps({"type": "Flush"}))
+                    if capture:
+                        capture.flush()
+                
+                logging.info(f"[Deepgram TTS raw] Sent {sentence_count} sentences to Deepgram")
+                if sentence_count == 0:
+                    logging.warning("[Deepgram TTS raw] No sentences to send!")
+                else:
+                    logging.info(f"[Deepgram TTS raw] Sender completed successfully")
+            except Exception as exc:
+                logging.error(f"[Deepgram TTS raw] Error in sender: {exc}", exc_info=True)
+            finally:
+                logging.info("[Deepgram TTS raw] Sender task finished")
 
         send_task = asyncio.create_task(sender())
 
         last_audio = time.perf_counter()
         total = 0
+        audio_chunks_received = 0
         try:
             while True:
                 try:
-                    msg = await asyncio.wait_for(ws.recv(), timeout=1.2)
+                    msg = await asyncio.wait_for(ws.recv(), timeout=15.0)
                 except asyncio.TimeoutError:
-                    if send_task.done() and (time.perf_counter() - last_audio) > 1.0:
+                    # Log status during timeout
+                    idle_time = time.perf_counter() - last_audio
+                    logging.info(f"[Deepgram TTS raw] Timeout: sender_done={send_task.done()}, idle={idle_time:.1f}s, chunks={audio_chunks_received}, bytes={total}")
+                    
+                    # Only break if sender is done AND no audio for 15 seconds
+                    if send_task.done() and idle_time > 15.0:
+                        logging.info(f"[Deepgram TTS raw] Stream complete after {idle_time:.1f}s idle, total audio: {total} bytes")
                         break
+                    # Still waiting for more audio, continue
                     continue
 
                 if isinstance(msg, (bytes, bytearray)):
-                    last_audio = time.perf_counter()
+                    now = time.perf_counter()
+                    gap_since_last = now - last_audio
+                    last_audio = now
+                    
                     frame = bytes(msg)
                     total += len(frame)
+                    audio_chunks_received += 1
+                    duration_ms = _pcm_duration_ms(total, DEEPGRAM_SAMPLE_RATE)
+                    
+                    # Log gaps that could cause playback issues
+                    if gap_since_last > 1.0 and audio_chunks_received > 1:
+                        logging.warning(f"[Deepgram TTS raw] Large gap detected: {gap_since_last:.2f}s since last audio chunk")
+                    
+                    if audio_chunks_received % 10 == 0:
+                        logging.info(f"[Deepgram TTS raw] Received {audio_chunks_received} audio chunks, {total} bytes total, last gap: {gap_since_last:.3f}s")
+                    
                     if capture and str(DEEPGRAM_STREAM_ENCODING).lower() == "linear16":
-                        capture.audio(len(frame), _pcm_duration_ms(total, DEEPGRAM_SAMPLE_RATE))
+                        capture.audio(len(frame), duration_ms)
+                    
+                    # Add audio to transcription buffer
+                    if transcription and str(DEEPGRAM_STREAM_ENCODING).lower() == "linear16":
+                        transcription.add_audio_chunk(frame, _pcm_duration_ms(len(frame), DEEPGRAM_SAMPLE_RATE))
+                        # Periodically trigger transcription update
+                        await transcription.maybe_update()
+                    
                     yield frame
                     continue
 
-                logging.info("[Deepgram WS raw] text: %s", msg)
+                logging.info("[Deepgram WS raw] text message: %s", msg)
         except ConnectionClosedOK:
             logging.info("[Deepgram WS raw] connection closed normally")
         except ConnectionClosedError as exc:
@@ -263,6 +447,10 @@ async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[byt
                 await ws.send(json.dumps({"type": "Close"}))
             if capture:
                 capture.close()
+            if transcription:
+                with contextlib.suppress(Exception):
+                    await transcription.finalize()
+                transcription.close()
             with contextlib.suppress(Exception):
                 await ws.close()
             if not send_task.done():

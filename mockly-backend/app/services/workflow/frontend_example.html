@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Transcription - Frontend Example</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #4CAF50;
+            padding-bottom: 10px;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        button.start {
+            background: #4CAF50;
+            color: white;
+        }
+        button.start:hover {
+            background: #45a049;
+        }
+        button.stop {
+            background: #f44336;
+            color: white;
+        }
+        button.stop:hover {
+            background: #da190b;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status.active {
+            background: #4CAF50;
+            color: white;
+        }
+        .status.inactive {
+            background: #ccc;
+            color: #666;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            padding: 15px;
+            background: #f9f9f9;
+            border-left: 4px solid #4CAF50;
+            border-radius: 4px;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #333;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .transcription-view {
+            margin: 20px 0;
+            padding: 20px;
+            background: #fafafa;
+            border-radius: 4px;
+            min-height: 200px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .word {
+            display: inline-block;
+            margin: 3px;
+            padding: 5px 8px;
+            background: white;
+            border-radius: 3px;
+            border: 1px solid #ddd;
+            transition: all 0.2s;
+        }
+        .word.current {
+            background: #4CAF50;
+            color: white;
+            transform: scale(1.1);
+        }
+        .word:hover {
+            background: #e8f5e9;
+            cursor: pointer;
+        }
+        .timeline {
+            margin: 20px 0;
+            padding: 10px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+        .timeline-bar {
+            width: 100%;
+            height: 6px;
+            background: #ddd;
+            border-radius: 3px;
+            position: relative;
+            margin: 10px 0;
+        }
+        .timeline-progress {
+            height: 100%;
+            background: linear-gradient(90deg, #4CAF50, #45a049);
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+        .json-view {
+            margin: 20px 0;
+            padding: 15px;
+            background: #2d2d2d;
+            color: #f8f8f2;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .error {
+            padding: 15px;
+            background: #ffebee;
+            color: #c62828;
+            border-left: 4px solid #c62828;
+            border-radius: 4px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎙️ Live Transcription Viewer</h1>
+        
+        <div class="controls">
+            <button id="startBtn" class="start">Start Polling</button>
+            <button id="stopBtn" class="stop" disabled>Stop Polling</button>
+            <span class="status inactive" id="status">Inactive</span>
+            <input type="text" id="jsonPath" value="live_transcription.json" 
+                   placeholder="Path to JSON file" style="flex: 1; padding: 8px;">
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="wordCount">0</div>
+                <div class="stat-label">Total Words</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="duration">0.0s</div>
+                <div class="stat-label">Duration</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="lastUpdate">Never</div>
+                <div class="stat-label">Last Update</div>
+            </div>
+        </div>
+
+        <div id="errorDiv" style="display: none;" class="error"></div>
+
+        <h2>Transcription</h2>
+        <div class="transcription-view" id="transcriptionView">
+            <p style="color: #999; text-align: center;">No transcription data yet. Start polling to see results.</p>
+        </div>
+
+        <h2>Raw JSON Data</h2>
+        <div class="json-view" id="jsonView">
+            <pre>No data loaded yet.</pre>
+        </div>
+    </div>
+
+    <script>
+        class LiveTranscriptionReader {
+            constructor(jsonPath, pollInterval = 500) {
+                this.jsonPath = jsonPath;
+                this.pollInterval = pollInterval;
+                this.lastUpdate = null;
+                this.words = [];
+                this.intervalId = null;
+            }
+
+            start() {
+                if (this.intervalId) return;
+                console.log('Starting transcription polling...');
+                this.intervalId = setInterval(() => this.poll(), this.pollInterval);
+                this.poll(); // Immediate first poll
+            }
+
+            stop() {
+                if (this.intervalId) {
+                    clearInterval(this.intervalId);
+                    this.intervalId = null;
+                    console.log('Stopped transcription polling');
+                }
+            }
+
+            async poll() {
+                try {
+                    const response = await fetch(this.jsonPath);
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    
+                    const data = await response.json();
+                    
+                    // Only process if file was updated
+                    if (data.last_updated !== this.lastUpdate) {
+                        this.lastUpdate = data.last_updated;
+                        this.words = data.transcription;
+                        this.onUpdate(data);
+                    }
+                } catch (error) {
+                    this.onError(error);
+                }
+            }
+
+            onUpdate(data) {
+                console.log(`Transcription updated: ${data.word_count} words`);
+                updateUI(data);
+            }
+
+            onError(error) {
+                console.error('Polling error:', error);
+                showError(error.message);
+            }
+
+            getCurrentWord(currentTime) {
+                return this.words.find(
+                    w => currentTime >= w.start_time && currentTime < w.end_time
+                );
+            }
+
+            getWordsUpTo(currentTime) {
+                return this.words.filter(w => w.start_time <= currentTime);
+            }
+        }
+
+        // UI State
+        let reader = null;
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const jsonPath = document.getElementById('jsonPath');
+            const status = document.getElementById('status');
+
+            startBtn.addEventListener('click', () => {
+                const path = jsonPath.value.trim();
+                if (!path) {
+                    showError('Please enter a valid JSON file path');
+                    return;
+                }
+
+                reader = new LiveTranscriptionReader(path, 500);
+                reader.start();
+
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+                status.textContent = 'Active';
+                status.className = 'status active';
+                hideError();
+            });
+
+            stopBtn.addEventListener('click', () => {
+                if (reader) {
+                    reader.stop();
+                }
+
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+                status.textContent = 'Inactive';
+                status.className = 'status inactive';
+            });
+        });
+
+        function updateUI(data) {
+            hideError();
+            
+            // Update stats
+            document.getElementById('wordCount').textContent = data.word_count;
+            
+            if (data.transcription.length > 0) {
+                const lastWord = data.transcription[data.transcription.length - 1];
+                document.getElementById('duration').textContent = 
+                    lastWord.end_time.toFixed(1) + 's';
+            }
+            
+            const updateTime = new Date(data.last_updated);
+            document.getElementById('lastUpdate').textContent = 
+                updateTime.toLocaleTimeString();
+
+            // Update transcription view
+            const transcriptionView = document.getElementById('transcriptionView');
+            transcriptionView.innerHTML = '';
+            
+            data.transcription.forEach((word, index) => {
+                const wordSpan = document.createElement('span');
+                wordSpan.className = 'word';
+                wordSpan.textContent = word.word;
+                wordSpan.title = `${word.start_time.toFixed(2)}s - ${word.end_time.toFixed(2)}s`;
+                wordSpan.addEventListener('click', () => {
+                    alert(`Word: ${word.word}\nStart: ${word.start_time}s\nEnd: ${word.end_time}s`);
+                });
+                transcriptionView.appendChild(wordSpan);
+            });
+
+            // Update JSON view
+            document.getElementById('jsonView').innerHTML = 
+                '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorDiv');
+            errorDiv.textContent = '⚠️ Error: ' + message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorDiv').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
+

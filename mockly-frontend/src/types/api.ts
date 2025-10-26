@@ -24,3 +24,18 @@ export interface ExecuteResponse {
     exitCode: number;
     timeMs?: number;
 }
+
+export interface WordTimestamp {
+    word: string;
+    start_time: number;
+    end_time: number;
+    confidence?: number;
+}
+
+export interface CaptionDataResponse {
+    words: WordTimestamp[];
+    status: 'active' | 'no_data' | 'error';
+    last_updated: number;
+    word_count?: number;
+    error?: string;
+}
