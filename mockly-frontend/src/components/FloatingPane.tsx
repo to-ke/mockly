@@ -3,7 +3,7 @@ import { ChevronDown, ChevronUp, Mic, MicOff, Send } from 'lucide-react'
 import { Button } from '@/components/Button'
 import { cn } from '@/lib/cn'
 import { AudioStreamer } from '@/services/audioStreamer'
-import floatingImage from '@/assets/react.svg'
+import { TalkingHead } from '@/components/TalkingHead'
 
 
 type ChatMessage = {
@@ -244,7 +244,7 @@ export function FloatingPane() {
             )}
 
             <div className="relative aspect-video w-full overflow-hidden bg-muted">
-                <img src={floatingImage} alt="Floating pane preview" className="h-full w-full object-cover" />
+                <TalkingHead />
             </div>
 
             <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${chatOpen ? 'grid-rows-[1fr_auto]' : 'grid-rows-[0fr]'}`}>

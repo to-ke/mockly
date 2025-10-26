@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/Button'
 import DifficultyDropdown from '@/components/DifficultyDropdown'
 import { useAppState } from '@/stores/app'
 import { Api } from '@/services/api'
 import { useSession } from '@/stores/session'
+import { preloadTalkingHeadModel } from '@/lib/talkingHeadPreload'
 
 
 export function Landing() {
@@ -11,6 +12,18 @@ export function Landing() {
     const { applyQuestionData, language } = useSession()
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        let cancelled = false
+        preloadTalkingHeadModel().catch((err) => {
+            if (!cancelled) {
+                console.warn('TalkingHead preloading failed', err)
+            }
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [])
 
 
     const handleStart = async () => {
