@@ -63,6 +63,26 @@ def _format_examples(problem: dict) -> str:
     return "\n".join(lines)
 
 
+def _get_starter_code_for_language(problem: dict, language: str) -> str:
+    """Get starter code for the specified language, falling back to default if not available."""
+    language_map = {
+        "javascript": "starter_code_javascript",
+        "java": "starter_code_java", 
+        "cpp": "starter_code_cpp",
+        "typescript": "starter_code_typescript",
+        "go": "starter_code_go",
+        "c": "starter_code_c",
+        "csharp": "starter_code_csharp",
+        "kotlin": "starter_code_kotlin",
+        "ruby": "starter_code_ruby",
+        "perl": "starter_code_perl",
+    }
+    
+    # Get the appropriate starter code field for the language
+    starter_code_field = language_map.get(language, "starter_code")  # default to python
+    return (problem.get(starter_code_field) or "").rstrip()
+
+
 @router.post("/questions", response_model=QuestionPayload)
 def fetch_question(req: QuestionRequest) -> QuestionPayload:
     # difficulty is case-insensitive in the YAML index
@@ -79,11 +99,14 @@ def fetch_question(req: QuestionRequest) -> QuestionPayload:
     if examples_blob:
         prompt = f"{prompt}\n\n{examples_blob}"
 
+    # Get starter code for the requested language
+    starter_code = _get_starter_code_for_language(item, req.language)
+    
     return QuestionPayload(
         id=f"{req.difficulty}-{uuid.uuid4().hex[:8]}",
         difficulty=req.difficulty,
         prompt=prompt,
-        starter_code= (item.get("starter_code") or "").rstrip() or None,
-        language=item.get("language"),
+        starter_code=starter_code or None,
+        language=req.language,
         answers=None,
     )

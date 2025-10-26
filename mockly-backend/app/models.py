@@ -6,6 +6,7 @@ from pydantic import BaseModel
 # --- Questions ---
 class QuestionRequest(BaseModel):
     difficulty: Literal["easy", "medium", "hard"]
+    language: Optional[Literal["python", "javascript", "typescript", "java", "cpp", "go", "c", "csharp", "kotlin", "ruby", "perl"]] = "python"
 
 
 class QuestionPayload(BaseModel):
