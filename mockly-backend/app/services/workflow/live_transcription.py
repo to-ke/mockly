@@ -128,18 +128,29 @@ class LiveTranscriptionWriter:
             )
             
             if not should_update:
+                # Log status periodically for debugging
+                if buffer_size > 0 and time_since_last >= self.update_interval:
+                    logging.debug(
+                        f"[LiveTranscription] Waiting for more audio: "
+                        f"{buffer_size} bytes (need {self.min_audio_bytes})"
+                    )
                 return
             
             # Extract audio for transcription
             audio_data = self._audio_buffer.getvalue()
             self._audio_buffer = BytesIO()  # Reset buffer
             self._last_update_time = now
+            
+            logging.info(
+                f"[LiveTranscription] Triggering transcription: "
+                f"{len(audio_data)} bytes, {time_since_last:.1f}s since last update"
+            )
         
         # Transcribe outside the lock
         try:
             await self._transcribe_and_update(audio_data)
         except Exception as exc:
-            logging.error("[LiveTranscription] Update failed: %s", exc, exc_info=True)
+            logging.error(f"[LiveTranscription] Update failed: {exc}", exc_info=True)
 
     async def _transcribe_and_update(self, audio_data: bytes) -> None:
         """
@@ -181,23 +192,38 @@ class LiveTranscriptionWriter:
         Returns:
             List of word dictionaries with start_time, end_time, and word
         """
-        # Determine content type based on encoding
+        if not audio_data or len(audio_data) == 0:
+            logging.warning("[LiveTranscription] Empty audio data, skipping transcription")
+            return []
+        
+        # Log audio size for debugging
+        logging.info(f"[LiveTranscription] Transcribing {len(audio_data)} bytes of audio")
+        
+        # For raw PCM audio, use query parameters for encoding
+        # This is the correct way to send raw audio to Deepgram
         if self.encoding.lower() in ("linear16", "pcm"):
-            content_type = f"audio/raw; encoding=signed-integer; bits=16; sample_rate={self.sample_rate}; channels=1"
+            content_type = "audio/raw"
+            params = {
+                "model": DEEPGRAM_STT_MODEL,
+                "punctuate": True,
+                "utterances": False,
+                "smart_format": True,
+                "encoding": "linear16",
+                "sample_rate": self.sample_rate,
+                "channels": 1,
+            }
         else:
-            content_type = "audio/wav"  # Fallback
+            content_type = "audio/wav"
+            params = {
+                "model": DEEPGRAM_STT_MODEL,
+                "punctuate": True,
+                "utterances": False,
+                "smart_format": True,
+            }
         
         headers = {
             "Authorization": f"Token {DEEPGRAM_API_KEY}",
             "Content-Type": content_type,
-        }
-        
-        # Request word-level timestamps
-        params = {
-            "model": DEEPGRAM_STT_MODEL,
-            "punctuate": True,
-            "utterances": False,  # We want words, not utterances
-            "smart_format": True,
         }
         
         url = "https://api.deepgram.com/v1/listen"
@@ -210,20 +236,45 @@ class LiveTranscriptionWriter:
                     headers=headers,
                     content=audio_data,
                 )
-                response.raise_for_status()
+                
+                # Log response status for debugging
+                logging.info(f"[LiveTranscription] Deepgram response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    error_text = response.text
+                    logging.error(f"[LiveTranscription] Deepgram API error {response.status_code}: {error_text}")
+                    return []
+                
                 data = response.json()
+        except httpx.HTTPStatusError as exc:
+            logging.error(f"[LiveTranscription] HTTP error {exc.response.status_code}: {exc.response.text}")
+            return []
         except Exception as exc:
-            logging.error("[LiveTranscription] Deepgram API error: %s", exc)
+            logging.error(f"[LiveTranscription] Deepgram API error: {exc}", exc_info=True)
             return []
         
         # Extract word timestamps
         try:
+            # Log the transcript to see if we got anything
+            transcript = (
+                data.get("results", {})
+                .get("channels", [{}])[0]
+                .get("alternatives", [{}])[0]
+                .get("transcript", "")
+            )
+            logging.info(f"[LiveTranscription] Transcript received: {transcript[:100]}")
+            
             words_data = (
                 data.get("results", {})
                 .get("channels", [{}])[0]
                 .get("alternatives", [{}])[0]
                 .get("words", [])
             )
+            
+            if not words_data:
+                logging.warning("[LiveTranscription] No words in Deepgram response")
+                logging.debug(f"[LiveTranscription] Full response: {data}")
+                return []
             
             word_list = []
             for word_obj in words_data:
@@ -233,11 +284,12 @@ class LiveTranscriptionWriter:
                     "end_time": round(word_obj.get("end", 0.0), 3),
                 })
             
+            logging.info(f"[LiveTranscription] Extracted {len(word_list)} words")
             return word_list
             
         except Exception as exc:
-            logging.error("[LiveTranscription] Failed to parse words: %s", exc)
-            logging.debug("[LiveTranscription] Response data: %s", data)
+            logging.error(f"[LiveTranscription] Failed to parse words: {exc}", exc_info=True)
+            logging.debug(f"[LiveTranscription] Response data: {data}")
             return []
 
     def _write_json_file(self, words: list[dict[str, Any]]) -> None:

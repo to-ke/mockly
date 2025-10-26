@@ -115,7 +115,7 @@ export const Api = {
         }
         return res.json() as Promise<QuestionResponse>
     },
-    async fetchFeedback(): Promise<FeedbackReport> {
+    async fetchFeedback(payload: { code: string; language: string; question?: any }): Promise<FeedbackReport> {
         if (useMock) {
             await new Promise((resolve) => setTimeout(resolve, 600))
             return {
@@ -127,7 +127,11 @@ export const Api = {
             }
         }
 
-        const res = await fetch(`${API_BASE}/feedback`, { method: 'GET' })
+        const res = await fetch(`${API_BASE}/feedback`, { 
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
         if (!res.ok) {
             const text = await res.text()
             throw new Error(text || res.statusText)

@@ -158,3 +158,92 @@ def build_system_prompt_from_question(question: dict | None) -> str:
     ]
 
     return "\n".join(part for part in parts if part is not None)
+
+
+def build_code_evaluation_prompt(code: str, language: str, question: dict | None = None) -> str:
+    """
+    Construct an evaluation prompt that includes the candidate's code
+    and asks Claude to rate it based on the defined criteria.
+    """
+    if not isinstance(question, dict):
+        question = {}
+    
+    title = (question.get("title") or "").strip()
+    difficulty = (question.get("difficulty") or "").strip()
+    statement = (question.get("statement") or question.get("prompt") or "").strip()
+    
+    question_context = ""
+    if title or difficulty or statement:
+        question_parts = []
+        if title:
+            question_parts.append(f"Title: {title}")
+        if difficulty:
+            question_parts.append(f"Difficulty: {difficulty}")
+        if statement:
+            question_parts.append(f"\nProblem Statement:\n{statement}")
+        question_context = "\n".join(question_parts)
+    
+    parts = [
+        "You are a technical interviewer evaluating a candidate's code submission for a coding interview.",
+        "",
+        "Here is the question the candidate was working on:",
+        "<question>",
+        question_context or "A coding problem was presented to the candidate.",
+        "</question>",
+        "",
+        f"The candidate wrote their solution in {language}. Here is their code:",
+        "<code>",
+        code,
+        "</code>",
+        "",
+        "Please evaluate this code submission based on the following criteria:",
+        "",
+        "1. **Code Cleanliness** (1-5) - Consider:",
+        "   - Readability and code clarity",
+        "   - Proper variable and function naming conventions",
+        "   - Code organization and structure",
+        "   - Adherence to good coding practices and style guidelines",
+        "   - Appropriate use of comments (if needed for complex logic)",
+        "   - Consistent formatting and indentation",
+        "",
+        "2. **Communication** (1-5) - This should be rated as 3 (placeholder) for now.",
+        "   We will implement this based on voice/text interaction later.",
+        "",
+        "3. **Efficiency** (1-5) - Assess:",
+        "   - Time complexity of the solution",
+        "   - Space complexity and memory usage",
+        "   - Whether the solution is optimized",
+        "   - Use of appropriate algorithms and data structures",
+        "   - Consideration of edge cases and performance",
+        "",
+        "**Rating Scale:**",
+        "- 1: Poor - Major issues, does not meet basic standards",
+        "- 2: Below Average - Significant room for improvement",
+        "- 3: Average - Meets basic requirements but could be better",
+        "- 4: Good - Well done with minor areas for improvement",
+        "- 5: Excellent - Outstanding work, professional quality",
+        "",
+        "**Output Format:**",
+        "Please provide your evaluation in the following format:",
+        "",
+        "<evaluation>",
+        "**Code Cleanliness:**",
+        "[Detailed feedback on code quality, naming conventions, structure, readability, etc.]",
+        "Score: [1-5]",
+        "",
+        "**Communication:**",
+        "[Placeholder - Rate as 3]",
+        "Score: 3",
+        "",
+        "**Efficiency:**",
+        "[Detailed feedback on algorithmic complexity, optimization, data structure choices, etc.]",
+        "Score: [1-5]",
+        "",
+        "**Overall Comments:**",
+        "[Summary of strengths, weaknesses, and specific suggestions for improvement]",
+        "</evaluation>",
+        "",
+        "Be constructive, specific, and provide actionable feedback.",
+    ]
+    
+    return "\n".join(part for part in parts if part is not None)

@@ -1,6 +1,7 @@
 import { Button } from '@/components/Button'
 import { useAppState } from '@/stores/app'
 import { Star } from 'lucide-react'
+import { renderMarkdown } from '@/lib/markdown'
 
 
 interface RatingCardProps {
@@ -59,9 +60,10 @@ export function FeedbackView() {
 
                 <section className="space-y-3">
                     <h2 className="text-base font-semibold text-foreground">Interviewer Comments</h2>
-                    <div className="card-rise delay-100 max-h-60 overflow-y-auto rounded-3xl border border-border/60 bg-background/80 p-5 text-sm leading-relaxed text-muted-foreground dark:border-transparent dark:bg-background/40 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)]">
-                        {feedback.comments}
-                    </div>
+                    <div 
+                        className="card-rise delay-100 max-h-60 overflow-y-auto rounded-3xl border border-border/60 bg-background/80 p-5 text-sm leading-relaxed text-muted-foreground dark:border-transparent dark:bg-background/40 dark:shadow-[0_0_0_1px_rgba(255,255,255,0.08)] [&>p]:mb-3 [&>p:last-child]:mb-0 [&_strong]:text-foreground [&_strong]:font-semibold [&_strong]:text-base [&_strong]:block [&_strong]:mb-2 [&_strong]:mt-4 [&_strong:first-child]:mt-0 [&_em]:italic [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-muted/50 [&_code]:text-foreground/90 [&_code]:font-mono [&_code]:text-xs"
+                        dangerouslySetInnerHTML={{ __html: renderMarkdown(feedback.comments) }}
+                    />
                 </section>
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
