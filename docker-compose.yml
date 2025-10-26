@@ -5,6 +5,8 @@ services:
     build:
       context: ./mockly-backend
       dockerfile: Dockerfile
+    env_file:
+      - ./mockly-backend/.env
     environment:
       - HOST=0.0.0.0
       - PORT=8000
