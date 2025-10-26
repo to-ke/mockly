@@ -44,13 +44,22 @@ difficulties:
               // Your code here
           }
         starter_code_java: |
-          class Solution {
-              public int[] twoSum(int[] nums, int target) {
+          public class Main {
+              public static void main(String[] args) {
+                  // You can test your solution here
+                  System.out.println("Hello Java");
+              }
+              
+              // Implement your solution API
+              public static int[] twoSum(int[] nums, int target) {
                   // Your code here
                   return new int[0];
               }
           }
         starter_code_cpp: |
+          #include <vector>
+          using namespace std;
+          
           class Solution {
           public:
               vector<int> twoSum(vector<int>& nums, int target) {
@@ -64,24 +73,49 @@ difficulties:
               return [];
           }
         starter_code_go: |
+          package main
+          import "fmt"
+          
+          func main() {
+              fmt.Println("Hello from Go")
+          }
+          
           func twoSum(nums []int, target int) []int {
               // Your code here
               return []int{}
           }
         starter_code_c: |
+          #include <stdio.h>
+          #include <stdlib.h>
+          
           int* twoSum(int* nums, int numsSize, int target, int* returnSize) {
               // Your code here
               *returnSize = 2;
               return malloc(2 * sizeof(int));
           }
+          
+          int main() {
+              printf("Hello from C\n");
+              return 0;
+          }
         starter_code_csharp: |
-          public class Solution {
-              public int[] TwoSum(int[] nums, int target) {
+          using System;
+          
+          class Program {
+              static void Main() {
+                  Console.WriteLine("Hello from C#");
+              }
+              
+              public static int[] TwoSum(int[] nums, int target) {
                   // Your code here
                   return new int[0];
               }
           }
         starter_code_kotlin: |
+          fun main() {
+              println("Hello from Kotlin")
+          }
+          
           class Solution {
               fun twoSum(nums: IntArray, target: Int): IntArray {
                   // Your code here
@@ -134,13 +168,22 @@ difficulties:
               return [];
           }
         starter_code_java: |
-          class Solution {
-              public List<List<Integer>> threeSum(int[] nums) {
+          import java.util.*;
+          
+          public class Main {
+              public static void main(String[] args) {
+                  System.out.println("Hello Java");
+              }
+              
+              public static List<List<Integer>> threeSum(int[] nums) {
                   // Your code here
                   return new ArrayList<>();
               }
           }
         starter_code_cpp: |
+          #include <vector>
+          using namespace std;
+          
           class Solution {
           public:
               vector<vector<int>> threeSum(vector<int>& nums) {
@@ -154,24 +197,50 @@ difficulties:
               return [];
           }
         starter_code_go: |
+          package main
+          import "fmt"
+          
+          func main() {
+              fmt.Println("Hello from Go")
+          }
+          
           func threeSum(nums []int) [][]int {
               // Your code here
               return [][]int{}
           }
         starter_code_c: |
+          #include <stdio.h>
+          #include <stdlib.h>
+          
           int** threeSum(int* nums, int numsSize, int* returnSize, int** returnColumnSizes) {
               // Your code here
               *returnSize = 0;
               return NULL;
           }
+          
+          int main() {
+              printf("Hello from C\n");
+              return 0;
+          }
         starter_code_csharp: |
-          public class Solution {
-              public IList<IList<int>> ThreeSum(int[] nums) {
+          using System;
+          using System.Collections.Generic;
+          
+          class Program {
+              static void Main() {
+                  Console.WriteLine("Hello from C#");
+              }
+              
+              public static IList<IList<int>> ThreeSum(int[] nums) {
                   // Your code here
                   return new List<IList<int>>();
               }
           }
         starter_code_kotlin: |
+          fun main() {
+              println("Hello from Kotlin")
+          }
+          
           class Solution {
               fun threeSum(nums: IntArray): List<List<Int>> {
                   // Your code here
@@ -219,13 +288,20 @@ difficulties:
               return 0;
           }
         starter_code_java: |
-          class Solution {
-              public double findMedianSortedArrays(int[] nums1, int[] nums2) {
+          public class Main {
+              public static void main(String[] args) {
+                  System.out.println("Hello Java");
+              }
+              
+              public static double findMedianSortedArrays(int[] nums1, int[] nums2) {
                   // Your code here
                   return 0.0;
               }
           }
         starter_code_cpp: |
+          #include <vector>
+          using namespace std;
+          
           class Solution {
           public:
               double findMedianSortedArrays(vector<int>& nums1, vector<int>& nums2) {
