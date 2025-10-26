@@ -12,6 +12,7 @@ fastapi = "^0.120.0"
 uvicorn = {extras = ["standard"], version = "^0.38.0"}
 pyyaml = "^6.0.3"
 aiortc = "^1.14.0"
+elevenlabs = "^2.20.1"
 python-dotenv = "^1.1.1"
 anthropic = "^0.71.0"
 deepgram-sdk = "^5.2.0"

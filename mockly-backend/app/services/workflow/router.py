@@ -26,7 +26,7 @@ from .transcription import (
     transcribe_prerecorded_deepgram,
     transcribe_prerecorded_deepgram_detailed,
 )
-from .tts import stream_deepgram_tts, stream_deepgram_tts_raw
+from .tts import stream_deepgram_tts, stream_deepgram_tts_raw, stream_elevenlabs_tts
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 
@@ -48,9 +48,10 @@ def _resolve_user_text(payload: dict, question: dict | None) -> str:
 
 
 def _stream_media_response(generator: AsyncIterator[bytes]):
+    # ElevenLabs pcm_16000 format: 16-bit PCM at 16kHz mono
     return StreamingResponse(
         generator,
-        media_type=f"audio/L16; rate={DEEPGRAM_SAMPLE_RATE}; channels=1",
+        media_type=f"audio/L16; rate=16000; channels=1",
     )
 
 
@@ -95,12 +96,12 @@ async def type_streaming(payload: dict = Body(...)):
             for i, sentence in enumerate(all_sentences, 1):
                 logging.info(f"[/type/stream] Sentence {i}: {sentence[:100]}...")
             
-            # Step 3: Stream sentences to Deepgram TTS
+            # Step 3: Stream sentences to ElevenLabs TTS
             tts_start = time.perf_counter()
             total_bytes = 0
             first_audio = True
             
-            async for audio in stream_deepgram_tts_raw(iter(all_sentences)):
+            async for audio in stream_elevenlabs_tts(iter(all_sentences)):
                 if first_audio:
                     logging.info(f"[/type/stream] First audio chunk after {(time.perf_counter() - start_time)*1000:.1f}ms from start")
                     logging.info(f"[/type/stream] Time from Claude completion to first audio: {(time.perf_counter() - claude_start - claude_elapsed)*1000:.1f}ms")

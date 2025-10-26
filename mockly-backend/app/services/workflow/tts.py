@@ -1,5 +1,6 @@
 """
-Deepgram streaming helpers used by the workflow endpoints.
+TTS streaming helpers used by the workflow endpoints.
+Now using ElevenLabs for text-to-speech generation.
 """
 
 from __future__ import annotations
@@ -19,6 +20,10 @@ from .config import (
     DEEPGRAM_SAMPLE_RATE,
     DEEPGRAM_STREAM_ENCODING,
     DEEPGRAM_TTS_VOICE,
+    ELEVENLABS_API_KEY,
+    ELEVENLABS_VOICE_ID,
+    ELEVENLABS_MODEL,
+    ELEVENLABS_OUTPUT_FORMAT,
 )
 from .speech import sanitize_for_tts
 from .config import (
@@ -468,4 +473,77 @@ async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[byt
                     await send_task
 
 
-__all__ = ["stream_deepgram_tts", "stream_deepgram_tts_raw"]
+async def stream_elevenlabs_tts(sentences: Iterable[str]) -> AsyncIterator[bytes]:
+    """
+    Stream TTS audio from ElevenLabs API.
+    
+    Takes an iterable of text sentences and yields PCM audio bytes suitable
+    for the talking head. Uses the websocket streaming API for low latency.
+    """
+    try:
+        from elevenlabs.client import ElevenLabs
+        from elevenlabs import Voice, VoiceSettings
+    except ImportError as exc:
+        raise RuntimeError(
+            "Missing dependency 'elevenlabs'. Install with: pip install elevenlabs"
+        ) from exc
+    
+    logging.info(f"[ElevenLabs TTS] Initializing with voice={ELEVENLABS_VOICE_ID}, model={ELEVENLABS_MODEL}")
+    
+    client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+    
+    # Collect sentences to send as a batch for better streaming
+    sentence_buffer = []
+    
+    if hasattr(sentences, "__aiter__"):
+        async for sentence in sentences:  # type: ignore[attr-defined]
+            clean = sanitize_for_tts(str(sentence)).strip()
+            if clean:
+                sentence_buffer.append(clean)
+    else:
+        for sentence in sentences:  # type: ignore
+            clean = sanitize_for_tts(str(sentence)).strip()
+            if clean:
+                sentence_buffer.append(clean)
+    
+    if not sentence_buffer:
+        logging.warning("[ElevenLabs TTS] No sentences to synthesize")
+        return
+    
+    full_text = " ".join(sentence_buffer)
+    logging.info(f"[ElevenLabs TTS] Synthesizing {len(full_text)} characters across {len(sentence_buffer)} sentences")
+    logging.info(f"[ElevenLabs TTS] Text preview: {full_text[:200]}...")
+    
+    try:
+        # Use streaming API for low latency
+        audio_stream = client.text_to_speech.convert_as_stream(
+            voice_id=ELEVENLABS_VOICE_ID,
+            text=full_text,
+            model_id=ELEVENLABS_MODEL,
+            output_format=ELEVENLABS_OUTPUT_FORMAT,
+        )
+        
+        total_bytes = 0
+        chunk_count = 0
+        start_time = time.perf_counter()
+        
+        for chunk in audio_stream:
+            if chunk:
+                total_bytes += len(chunk)
+                chunk_count += 1
+                if chunk_count == 1:
+                    first_chunk_time = time.perf_counter() - start_time
+                    logging.info(f"[ElevenLabs TTS] First audio chunk after {first_chunk_time*1000:.1f}ms")
+                yield chunk
+                # Allow other async tasks to run
+                await asyncio.sleep(0)
+        
+        elapsed = time.perf_counter() - start_time
+        logging.info(f"[ElevenLabs TTS] Complete: {total_bytes} bytes in {chunk_count} chunks, {elapsed:.2f}s")
+        
+    except Exception as exc:
+        logging.error(f"[ElevenLabs TTS] Error during synthesis: {exc}", exc_info=True)
+        raise
+
+
+__all__ = ["stream_deepgram_tts", "stream_deepgram_tts_raw", "stream_elevenlabs_tts"]

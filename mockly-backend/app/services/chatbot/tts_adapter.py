@@ -1,15 +1,15 @@
-"""TTS sanitation and Deepgram adapters.
+"""TTS sanitation and TTS adapters.
 
-This module provides `sanitize_for_tts` and a small Deepgram TTS
-adapter used to stream audio frames. The implementation is intentionally
-similar to the helpers in `workflow/api.py` so it can be used as a
-drop-in replacement during refactor.
+This module provides `sanitize_for_tts` and TTS adapters for both
+Deepgram and ElevenLabs. The implementation is intentionally similar to
+the helpers in `workflow/api.py` so it can be used as a drop-in replacement.
 """
 from typing import Iterable, AsyncIterator
 import re
 import contextlib
 import asyncio
 import logging
+import time
 from deepgram import DeepgramClient
 from deepgram.core.events import EventType
 from app.services.workflow.config import (
@@ -17,6 +17,10 @@ from app.services.workflow.config import (
     DEEPGRAM_TTS_VOICE,
     DEEPGRAM_STREAM_ENCODING,
     DEEPGRAM_SAMPLE_RATE,
+    ELEVENLABS_API_KEY,
+    ELEVENLABS_VOICE_ID,
+    ELEVENLABS_MODEL,
+    ELEVENLABS_OUTPUT_FORMAT,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,4 +156,85 @@ class DeepgramTTSAdapter:
             logger.warning("[Deepgram WS] no audio frames were received")
 
 
-__all__ = ["sanitize_for_tts", "DeepgramTTSAdapter"]
+class ElevenLabsTTSAdapter:
+    """Adapter to stream audio from ElevenLabs TTS API.
+
+    Methods:
+      - stream(sentences) -> AsyncIterator[bytes]
+
+    The adapter uses the official ElevenLabs client.
+    """
+
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or ELEVENLABS_API_KEY
+
+    async def stream(self, sentences: Iterable[str]) -> AsyncIterator[bytes]:
+        """Stream raw audio frames from ElevenLabs as bytes.
+
+        This implements streaming TTS using ElevenLabs API.
+        """
+        try:
+            from elevenlabs.client import ElevenLabs
+        except ImportError as exc:
+            raise RuntimeError(
+                "Missing dependency 'elevenlabs'. Install with: pip install elevenlabs"
+            ) from exc
+
+        logger.info(f"[ElevenLabs TTS] Initializing with voice={ELEVENLABS_VOICE_ID}, model={ELEVENLABS_MODEL}")
+
+        client = ElevenLabs(api_key=self.api_key)
+
+        # Collect sentences to send as a batch for better streaming
+        sentence_buffer = []
+
+        if hasattr(sentences, "__aiter__"):
+            async for sentence in sentences:  # type: ignore[attr-defined]
+                clean = sanitize_for_tts(str(sentence)).strip()
+                if clean:
+                    sentence_buffer.append(clean)
+        else:
+            for sentence in sentences:  # type: ignore
+                clean = sanitize_for_tts(str(sentence)).strip()
+                if clean:
+                    sentence_buffer.append(clean)
+
+        if not sentence_buffer:
+            logger.warning("[ElevenLabs TTS] No sentences to synthesize")
+            return
+
+        full_text = " ".join(sentence_buffer)
+        logger.info(f"[ElevenLabs TTS] Synthesizing {len(full_text)} characters across {len(sentence_buffer)} sentences")
+
+        try:
+            # Use streaming API for low latency
+            audio_stream = client.text_to_speech.convert_as_stream(
+                voice_id=ELEVENLABS_VOICE_ID,
+                text=full_text,
+                model_id=ELEVENLABS_MODEL,
+                output_format=ELEVENLABS_OUTPUT_FORMAT,
+            )
+
+            total_bytes = 0
+            chunk_count = 0
+            start_time = time.perf_counter()
+
+            for chunk in audio_stream:
+                if chunk:
+                    total_bytes += len(chunk)
+                    chunk_count += 1
+                    if chunk_count == 1:
+                        first_chunk_time = time.perf_counter() - start_time
+                        logger.info(f"[ElevenLabs TTS] First audio chunk after {first_chunk_time*1000:.1f}ms")
+                    yield chunk
+                    # Allow other async tasks to run
+                    await asyncio.sleep(0)
+
+            elapsed = time.perf_counter() - start_time
+            logger.info(f"[ElevenLabs TTS] Complete: {total_bytes} bytes in {chunk_count} chunks, {elapsed:.2f}s")
+
+        except Exception as exc:
+            logger.error(f"[ElevenLabs TTS] Error during synthesis: {exc}", exc_info=True)
+            raise
+
+
+__all__ = ["sanitize_for_tts", "DeepgramTTSAdapter", "ElevenLabsTTSAdapter"]

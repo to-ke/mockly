@@ -29,10 +29,17 @@ def _optional(name: str, default: str = "") -> str:
 
 
 ANTHROPIC_API_KEY = _required("ANTHROPIC_API_KEY")
-DEEPGRAM_API_KEY = _required("DEEPGRAM_API_KEY")
+ELEVENLABS_API_KEY = _required("ELEVENLABS_API_KEY")
+DEEPGRAM_API_KEY = _optional("DEEPGRAM_API_KEY", "")  # Keep for STT if needed
 
 ANTHROPIC_MODEL = _optional("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
 
+# ElevenLabs TTS settings
+ELEVENLABS_VOICE_ID = _optional("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")  # Default: Rachel
+ELEVENLABS_MODEL = _optional("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+ELEVENLABS_OUTPUT_FORMAT = _optional("ELEVENLABS_OUTPUT_FORMAT", "pcm_16000")  # PCM 16kHz for compatibility
+
+# Deepgram settings (kept for STT)
 DEEPGRAM_TTS_VOICE = _optional("DEEPGRAM_TTS_VOICE", "aura-2-thalia-en")
 DEEPGRAM_STREAM_ENCODING = _optional("DEEPGRAM_STREAM_ENCODING", "linear16")
 DEEPGRAM_SAMPLE_RATE = int(_optional("DEEPGRAM_SAMPLE_RATE", "48000"))
