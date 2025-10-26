@@ -38,5 +38,7 @@ DEEPGRAM_STREAM_ENCODING = _optional("DEEPGRAM_STREAM_ENCODING", "linear16")
 DEEPGRAM_SAMPLE_RATE = int(_optional("DEEPGRAM_SAMPLE_RATE", "48000"))
 DEEPGRAM_STT_MODEL = _optional("DEEPGRAM_STT_MODEL", "nova-3")
 
+TTS_LIVE_JSON_PATH = _optional("TTS_LIVE_JSON_PATH", "")
+
 _cors = _optional("CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:5173")
 CORS_ALLOW_ORIGINS = [origin.strip() for origin in _cors.split(",") if origin.strip()] or ["*"]
