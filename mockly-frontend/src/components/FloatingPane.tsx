@@ -4,6 +4,8 @@ import { Button } from '@/components/Button'
 import { cn } from '@/lib/cn'
 import { AudioStreamer } from '@/services/audioStreamer'
 import { TalkingHead } from '@/components/TalkingHead'
+import { useSession } from '@/stores/session'
+import renderMarkdown from '@/lib/markdown'
 
 
 type ChatMessage = {
@@ -114,16 +116,22 @@ export function FloatingPane() {
             timestamp: Date.now(),
         }
         setMessages((prev) => [...prev, message])
-        setDraft('')
+        setDraft('');
 
         // Replace canned reply with a real backend call to the assistant
         // (expects the workflow/api.py app to be mounted at /assistant).
         (async () => {
             try {
+                // Include the active question so the assistant matches the editor prompt
+                const state = (useSession as any).getState?.() || {}
+                const qPrompt = (state.lastPrompt || '').trim()
+                const qDiff = state.currentDifficulty || null
+                const questionPayload = qPrompt ? { question: { statement: qPrompt, difficulty: qDiff || undefined } } : {}
+
                 const res = await fetch('/assistant/debug/claude/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ text: trimmed }),
+                    body: JSON.stringify({ text: trimmed, ...questionPayload }),
                 })
 
                 if (!res.ok) {
@@ -280,7 +288,14 @@ export function FloatingPane() {
                                 key={id}
                                 className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'mr-auto bg-accent text-accent-foreground'}`}
                             >
-                                {content}
+                                {role === 'assistant' ? (
+                                    <div
+                                        className="space-y-1 leading-relaxed [&_strong]:font-semibold"
+                                        dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+                                    />
+                                ) : (
+                                    content
+                                )}
                             </div>
                         ))}
                     </div>

@@ -12,7 +12,7 @@ import asyncio
 import logging
 from deepgram import DeepgramClient
 from deepgram.core.events import EventType
-from workflow.config import (
+from app.services.workflow.config import (
     DEEPGRAM_API_KEY,
     DEEPGRAM_TTS_VOICE,
     DEEPGRAM_STREAM_ENCODING,

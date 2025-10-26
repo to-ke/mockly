@@ -61,6 +61,7 @@ else:
     # optional top-level `workflow` package being present in the image.
     from fastapi import Body, Response
     from app.services.chatbot.agent import ChatbotAgent
+    from app.services.chatbot.prompts import load_question_by_difficulty
 
     agent = ChatbotAgent()
 
@@ -69,9 +70,19 @@ else:
         text = (payload.get("text") or "").strip()
         if not text:
             return Response(content="", media_type="text/plain; charset=utf-8")
+
+        # Prefer an explicit question payload from the client, otherwise allow
+        # a difficulty hint to load a consistent question from questions.yaml.
+        question = payload.get("question")
+        if not question and payload.get("difficulty"):
+            try:
+                question = load_question_by_difficulty(str(payload.get("difficulty")))
+            except Exception:
+                question = None
+
         try:
             # Use the agent to get a full (non-streaming) reply for the frontend.
-            reply = agent.get_text(text)
+            reply = agent.get_text(text, question=question)
             return Response(content=reply, media_type="text/plain; charset=utf-8")
         except Exception as e:
             return Response(content=f"Error: {e}", media_type="text/plain; charset=utf-8", status_code=500)

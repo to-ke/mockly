@@ -9,7 +9,7 @@ import logging
 
 from anthropic import Anthropic
 
-from workflow.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
+from app.services.workflow.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL
 
 logger = logging.getLogger(__name__)
 
