@@ -1,0 +1,13 @@
+title: "Test Questions"
+metadata:
+  author: "Test"
+  created: "2025-01-24"
+
+difficulties:
+  - difficulty: easy
+    problems:
+      - title: "Test Problem"
+        statement: "Test problem statement"
+        starter_code: |
+          def test():
+              pass

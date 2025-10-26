@@ -19,11 +19,20 @@ export default defineConfig({
         target: backendTarget,
         changeOrigin: true,
       },
+      // Proxy assistant endpoints to the backend so
+      // fetch('/assistant/...') works in dev without 404s on :5173
+      '/assistant': {
+        target: backendTarget,
+        changeOrigin: true,
+      },
       '/ws': {
         target: backendTarget.replace('http', 'ws'),
         ws: true,
         changeOrigin: true,
       },
     },
+  },
+  optimizeDeps: {
+    exclude: ['@met4citizen/talkinghead', 'lipsync-fi.mjs'],
   },
 })

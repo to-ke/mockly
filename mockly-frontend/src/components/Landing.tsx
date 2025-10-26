@@ -1,26 +1,44 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '@/components/Button'
 import DifficultyDropdown from '@/components/DifficultyDropdown'
 import { useAppState } from '@/stores/app'
 import { Api } from '@/services/api'
 import { useSession } from '@/stores/session'
+import { preloadTalkingHeadModel } from '@/lib/talkingHeadPreload'
 
 
 export function Landing() {
     const { difficulty, startInterview } = useAppState()
-    const { applyQuestionPrompt } = useSession()
+    const { applyQuestionData, language } = useSession()
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        let cancelled = false
+        preloadTalkingHeadModel().catch((err) => {
+            if (!cancelled) {
+                console.warn('TalkingHead preloading failed', err)
+            }
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [])
 
 
     const handleStart = async () => {
         setError(null)
         setLoading(true)
         try {
-            // Placeholder request for later backend integration
-            const question = await Api.fetchQuestion({ difficulty })
+            // Pass current language to get appropriate starter code
+            const question = await Api.fetchQuestion({ difficulty, language })
             if (question?.prompt) {
-                applyQuestionPrompt(question.prompt)
+                applyQuestionData({
+                    prompt: question.prompt,
+                    starter_code: question.starter_code,
+                    language: question.language,
+                    difficulty: question.difficulty
+                })
             }
             startInterview()
         } catch (err: unknown) {

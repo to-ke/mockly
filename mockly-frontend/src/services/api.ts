@@ -1,5 +1,38 @@
-import type { ExecuteRequest, ExecuteResponse } from '@/types/api'
+import type { ExecuteRequest, ExecuteResponse, QuestionResponse, CaptionDataResponse } from '@/types/api'
 import type { Difficulty, FeedbackReport } from '@/stores/app'
+
+// Prefer talking directly to the backend in the browser to avoid
+// proxy flakiness when the Vite dev server restarts. Fall back to the
+// Vite proxy path ("/api") if we cannot infer a backend origin.
+export function resolveApiBase(): string {
+    // Explicit override first
+    const explicit = (import.meta as any).env?.VITE_BACKEND_ORIGIN as string | undefined
+    if (explicit && /^https?:\/\//i.test(explicit)) {
+        return explicit.replace(/\/$/, '') + '/api'
+    }
+
+    // Common dev setup: app runs on :5173, backend on :8000
+    try {
+        const loc = window.location
+        if (loc.port === '5173') {
+            const host = loc.hostname || 'localhost'
+            return `http://${host}:8000/api`
+        }
+    } catch (_) {
+        // window not available (SSR) — just fall back
+    }
+
+    // Fallback to proxy path; Vite will forward to backend if configured
+    return '/api'
+}
+
+// Resolve API base without /api suffix for direct backend access
+export function resolveBackendBase(): string {
+    const apiBase = resolveApiBase()
+    return apiBase.replace(/\/api$/, '')
+}
+
+const API_BASE = resolveApiBase()
 
 interface WebRtcOfferPayload {
     sdp: string
@@ -48,7 +81,7 @@ export const Api = {
         if (useMock) return mockExecute(payload)
 
 
-        const res = await fetch('/api/execute', {
+        const res = await fetch(`${API_BASE}/execute`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -59,17 +92,19 @@ export const Api = {
         }
         return res.json() as Promise<ExecuteResponse>
     },
-    async fetchQuestion(payload: { difficulty: Difficulty }) {
+    async fetchQuestion(payload: { difficulty: Difficulty; language?: string }): Promise<QuestionResponse> {
         if (useMock) {
             await new Promise((resolve) => setTimeout(resolve, 400))
             return {
                 id: `mock-${payload.difficulty}`,
                 difficulty: payload.difficulty,
                 prompt: `Mock ${payload.difficulty} question will appear here.`,
+                starter_code: 'def solution():\n    # Your code here\n    pass',
+                language: payload.language || 'python',
             }
         }
 
-        const res = await fetch('/api/questions', {
+        const res = await fetch(`${API_BASE}/questions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -78,7 +113,7 @@ export const Api = {
             const text = await res.text()
             throw new Error(text || res.statusText)
         }
-        return res.json()
+        return res.json() as Promise<QuestionResponse>
     },
     async fetchFeedback(): Promise<FeedbackReport> {
         if (useMock) {
@@ -92,7 +127,7 @@ export const Api = {
             }
         }
 
-        const res = await fetch('/api/feedback', { method: 'GET' })
+        const res = await fetch(`${API_BASE}/feedback`, { method: 'GET' })
         if (!res.ok) {
             const text = await res.text()
             throw new Error(text || res.statusText)
@@ -109,7 +144,7 @@ export const Api = {
             }
         }
 
-        const res = await fetch('/api/webrtc/offer', {
+        const res = await fetch(`${API_BASE}/webrtc/offer`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -122,7 +157,7 @@ export const Api = {
     },
     async sendWebRtcCandidate(payload: WebRtcCandidatePayload): Promise<void> {
         if (useMock) return
-        const res = await fetch('/api/webrtc/candidate', {
+        const res = await fetch(`${API_BASE}/webrtc/candidate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
@@ -134,10 +169,26 @@ export const Api = {
     },
     async closeWebRtcSession(sessionId: string): Promise<void> {
         if (useMock) return
-        const res = await fetch(`/api/webrtc/session/${sessionId}`, { method: 'DELETE' })
+        const res = await fetch(`${API_BASE}/webrtc/session/${sessionId}`, { method: 'DELETE' })
         if (!res.ok) {
             const text = await res.text()
             throw new Error(text || res.statusText)
         }
+    },
+    async fetchCaptions(): Promise<CaptionDataResponse> {
+        if (useMock) {
+            return {
+                words: [],
+                status: 'no_data',
+                last_updated: Date.now(),
+            }
+        }
+
+        const res = await fetch(`${API_BASE}/workflow/captions/live`, { method: 'GET' })
+        if (!res.ok) {
+            const text = await res.text()
+            throw new Error(text || res.statusText)
+        }
+        return res.json() as Promise<CaptionDataResponse>
     },
 }

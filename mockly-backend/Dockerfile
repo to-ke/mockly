@@ -27,6 +27,7 @@ RUN poetry config virtualenvs.create false && \
     poetry install --no-interaction --no-ansi --only main
 
 COPY app ./app
+COPY workflow ./workflow
 COPY questions.yaml ./questions.yaml
 EXPOSE 8000
 
