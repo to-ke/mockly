@@ -10,6 +10,10 @@ services:
       - PORT=8000
     ports:
       - "8000:8000"
+    # (removed bind mount) Use the image's copied files so the built
+    # image's /app (including workflow/) is used. For development you
+    # can re-enable a bind mount, but ensure the host folder contains
+    # the 'workflow' directory to avoid hiding the image files.
     cap_add:
       - SYS_ADMIN
       - NET_ADMIN

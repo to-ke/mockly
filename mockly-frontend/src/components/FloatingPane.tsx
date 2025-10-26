@@ -116,20 +116,45 @@ export function FloatingPane() {
         setMessages((prev) => [...prev, message])
         setDraft('')
 
-        const timeoutId = window.setTimeout(() => {
-            setMessages((prev) => [
-                ...prev,
-                {
-                    id: `assistant-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-                    role: 'assistant',
-                    content: "I'll check the backend once it's available and circle back!",
-                    timestamp: Date.now(),
-                },
-            ])
-            pendingReplyTimeouts.current = pendingReplyTimeouts.current.filter((id) => id !== timeoutId)
-        }, 700)
+        // Replace canned reply with a real backend call to the assistant
+        // (expects the workflow/api.py app to be mounted at /assistant).
+        (async () => {
+            try {
+                const res = await fetch('/assistant/debug/claude/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: trimmed }),
+                })
 
-        pendingReplyTimeouts.current.push(timeoutId)
+                if (!res.ok) {
+                    const body = await res.text()
+                    throw new Error(body || res.statusText)
+                }
+
+                // Read full text response (the endpoint streams plaintext)
+                const text = await res.text()
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: `assistant-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                        role: 'assistant',
+                        content: text || "(no reply)",
+                        timestamp: Date.now(),
+                    },
+                ])
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err)
+                setMessages((prev) => [
+                    ...prev,
+                    {
+                        id: `assistant-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                        role: 'assistant',
+                        content: `Error: ${msg}`,
+                        timestamp: Date.now(),
+                    },
+                ])
+            }
+        })()
     }
 
 
