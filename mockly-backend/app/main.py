@@ -15,6 +15,7 @@ from app.routes.routes_feedback import router as feedback_router
 from app.routes.routes_webrtc import router as webrtc_router
 from app.routes.routes_execute import router as execute_router
 from app.routes.routes_audio import router as audio_router
+from app.services.workflow import router as workflow_router
 
 
 app = FastAPI(title="Mockly", version="0.1.0")
@@ -35,6 +36,7 @@ app.include_router(feedback_router)
 app.include_router(webrtc_router)
 app.include_router(execute_router)
 app.include_router(audio_router)
+app.include_router(workflow_router)
 
 
 @app.get("/")
