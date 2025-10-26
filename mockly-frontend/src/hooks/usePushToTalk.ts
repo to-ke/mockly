@@ -86,6 +86,12 @@ export function usePushToTalk({
             
             // Create audio URL and play
             const audioUrl = URL.createObjectURL(wavBlob)
+            
+            console.log('[usePushToTalk] ✅ Created audio URL for playback:', {
+                url: audioUrl.substring(0, 50),
+                blobSize: wavBlob.size
+            })
+            
             setAudioUrl(audioUrl)
             
             // Play audio
@@ -94,8 +100,12 @@ export function usePushToTalk({
             }
             
             audioRef.current.src = audioUrl
-            audioRef.current.onplay = () => setPlaying(true)
+            audioRef.current.onplay = () => {
+                console.log('[usePushToTalk] Audio started playing')
+                setPlaying(true)
+            }
             audioRef.current.onended = () => {
+                console.log('[usePushToTalk] Audio finished playing')
                 setPlaying(false)
                 setProcessing(false)
                 onSuccess?.()

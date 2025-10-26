@@ -91,6 +91,9 @@ export function FloatingPane() {
                     timestamp: Date.now(),
                 },
             ])
+            // Clear audio and text after completion
+            setCurrentText(null)
+            setCurrentAudioUrl(null)
         },
         onError: (error) => {
             setMessages((prev) => [
@@ -102,6 +105,14 @@ export function FloatingPane() {
                     timestamp: Date.now(),
                 },
             ])
+        },
+        onAudioReady: (audioUrl, text) => {
+            console.log('[FloatingPane] ✓ Intro ready for lipsync:', {
+                audioUrl: audioUrl.substring(0, 50),
+                textLength: text.length
+            })
+            setCurrentAudioUrl(audioUrl)
+            setCurrentText(text)
         },
     })
     
@@ -495,7 +506,18 @@ export function FloatingPane() {
                 <TalkingHead 
                     audioUrl={currentAudioUrl}
                     text={currentText}
-                    onSpeakingStateChange={setAvatarSpeaking}
+                    onSpeakingStateChange={(speaking) => {
+                        setAvatarSpeaking(speaking)
+                        // If intro was playing and just finished speaking, mark as complete
+                        if (!speaking && isPlayingIntro && currentAudioUrl) {
+                            console.log('[FloatingPane] Intro lipsync complete, marking as finished')
+                            // Wait a moment then clear
+                            setTimeout(() => {
+                                setCurrentAudioUrl(null)
+                                setCurrentText(null)
+                            }, 500)
+                        }
+                    }}
                 />
             </div>
             

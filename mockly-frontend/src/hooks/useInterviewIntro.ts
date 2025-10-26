@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PCMAudioPlayer } from '@/services/pcmAudioPlayer'
+import { pcmToWav } from '@/services/voiceService'
 import type { Difficulty } from '@/stores/app'
 
 interface UseInterviewIntroOptions {
@@ -9,6 +9,7 @@ interface UseInterviewIntroOptions {
     onStart?: () => void
     onComplete?: () => void
     onError?: (error: string) => void
+    onAudioReady?: (audioUrl: string, text: string) => void
 }
 
 /**
@@ -22,10 +23,10 @@ export function useInterviewIntro({
     onStart,
     onComplete,
     onError,
+    onAudioReady,
 }: UseInterviewIntroOptions) {
     const [isPlaying, setIsPlaying] = useState(false)
     const [hasPlayed, setHasPlayed] = useState(false)
-    const audioPlayerRef = useRef<PCMAudioPlayer | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     
     const playIntroduction = async () => {
@@ -79,67 +80,127 @@ export function useInterviewIntro({
                 throw new Error('Response body is null')
             }
             
-            // Initialize audio player for progressive playback
-            if (!audioPlayerRef.current) {
-                audioPlayerRef.current = new PCMAudioPlayer(48000, 1)
-            }
-            
-            const audioPlayer = audioPlayerRef.current
-            console.log('[useInterviewIntro] Starting streaming playback...')
-            
-            // Track first audio playback
-            let firstAudioPlayed = false
-            
-            // Set up completion handler
-            audioPlayer.onComplete = () => {
-                const totalTime = performance.now() - startTime
-                console.log(`[useInterviewIntro] Playback ended. Total time: ${(totalTime / 1000).toFixed(1)}s`)
-                setIsPlaying(false)
-                setHasPlayed(true)
-                onComplete?.()
-            }
-            
-            audioPlayer.onError = (error) => {
-                console.error('[useInterviewIntro] Audio player error:', error)
-                setIsPlaying(false)
-                onError?.(error.message)
-            }
-            
-            // Stream audio chunks progressively
+            // Buffer all PCM audio chunks with timeout
+            console.log('[useInterviewIntro] Buffering audio for lipsync...')
+            const audioChunks: Uint8Array[] = []
             const reader = response.body.getReader()
             let receivedBytes = 0
             let chunkCount = 0
+            let lastChunkTime = Date.now()
+            const TIMEOUT_MS = 5000 // 5 second timeout between chunks
             
             try {
                 while (true) {
-                    const { done, value } = await reader.read()
+                    // Create a timeout promise
+                    const timeoutPromise = new Promise<{ done: true; value?: undefined }>((resolve) => {
+                        setTimeout(() => {
+                            console.log('[useInterviewIntro] ⚠ Timeout waiting for next chunk, assuming stream complete')
+                            resolve({ done: true })
+                        }, TIMEOUT_MS)
+                    })
+                    
+                    // Race between reading next chunk and timeout
+                    const result = await Promise.race([
+                        reader.read(),
+                        timeoutPromise
+                    ])
+                    
+                    const { done, value } = result
                     
                     if (done) {
-                        console.log(`[useInterviewIntro] Stream complete. Total: ${receivedBytes} bytes in ${chunkCount} chunks`)
-                        await audioPlayer.flush()
+                        console.log(`[useInterviewIntro] ✓ Stream complete. Total: ${receivedBytes} bytes in ${chunkCount} chunks`)
                         break
                     }
                     
                     chunkCount++
                     receivedBytes += value.byteLength
+                    audioChunks.push(value)
+                    lastChunkTime = Date.now()
                     
-                    // Log progress every 100KB
-                    if (chunkCount === 1 || receivedBytes % 100000 < value.byteLength) {
-                        console.log(`[useInterviewIntro] Received chunk ${chunkCount}: ${(receivedBytes / 1024).toFixed(1)}KB total`)
-                    }
-                    
-                    // Queue audio chunk for immediate playback
-                    await audioPlayer.queuePCM(value.buffer)
-                    
-                    if (!firstAudioPlayed) {
-                        firstAudioPlayed = true
-                        console.log(`[useInterviewIntro] First audio playing after ${(performance.now() - startTime).toFixed(0)}ms`)
+                    // Log every 10 chunks or first/last
+                    if (chunkCount === 1 || chunkCount % 10 === 0) {
+                        console.log(`[useInterviewIntro] Buffered chunk ${chunkCount}: ${(receivedBytes / 1024).toFixed(1)}KB total`)
                     }
                 }
                 
-                console.log(`[useInterviewIntro] Audio duration: ~${(receivedBytes / (48000 * 2)).toFixed(1)}s at 48kHz mono`)
+                // Cancel the reader if we timed out
+                try {
+                    await reader.cancel()
+                } catch (e) {
+                    // Ignore cancel errors
+                }
+                
+                if (chunkCount === 0 || receivedBytes === 0) {
+                    throw new Error('No audio data received from server')
+                }
+                
+                console.log(`[useInterviewIntro] Processing ${chunkCount} chunks (${(receivedBytes / 1024).toFixed(1)}KB)...`)
+                
+                // Combine all chunks into a single ArrayBuffer
+                console.log(`[useInterviewIntro] Combining ${chunkCount} chunks into single buffer...`)
+                const totalLength = audioChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0)
+                const combinedPcm = new Uint8Array(totalLength)
+                let offset = 0
+                for (const chunk of audioChunks) {
+                    combinedPcm.set(chunk, offset)
+                    offset += chunk.byteLength
+                }
+                
+                console.log(`[useInterviewIntro] Converting ${totalLength} bytes (${(totalLength / 1024).toFixed(1)}KB) to WAV...`)
+                
+                // Convert PCM to WAV
+                const wavBlob = await pcmToWav(combinedPcm.buffer, 48000, 1, 16)
+                console.log(`[useInterviewIntro] ✓ WAV blob created: ${(wavBlob.size / 1024).toFixed(1)}KB`)
+                
+                const audioUrl = URL.createObjectURL(wavBlob)
+                console.log(`[useInterviewIntro] ✓ Audio URL created: ${audioUrl}`)
+                
+                // Fetch the generated text
+                console.log('[useInterviewIntro] Fetching intro text...')
+                const textResponse = await fetch(`${apiBase}/workflow/text/last`)
+                let introText = ''
+                
+                if (textResponse.ok) {
+                    const textData = await textResponse.json()
+                    if (textData.text) {
+                        introText = textData.text
+                        console.log('[useInterviewIntro] ✓ Got intro text:', introText.substring(0, 100))
+                    } else {
+                        console.warn('[useInterviewIntro] ⚠ Text response OK but no text in data:', textData)
+                    }
+                } else {
+                    console.error('[useInterviewIntro] ❌ Failed to fetch text:', textResponse.status, textResponse.statusText)
+                }
+                
+                // Pass audio URL and text to parent for TalkingHead
+                if (onAudioReady) {
+                    if (introText) {
+                        console.log('[useInterviewIntro] ✓✓✓ Ready for lipsync! Calling onAudioReady...')
+                        onAudioReady(audioUrl, introText)
+                    } else {
+                        console.warn('[useInterviewIntro] ⚠ No text available, playing without lipsync')
+                        onAudioReady(audioUrl, '')
+                    }
+                } else {
+                    console.error('[useInterviewIntro] ❌ No onAudioReady callback provided!')
+                }
+                
+                // Mark as played - TalkingHead will handle actual playback
+                setIsPlaying(false)
+                setHasPlayed(true)
+                
+                const totalTime = performance.now() - startTime
+                console.log(`[useInterviewIntro] ✓ Total preparation time: ${(totalTime / 1000).toFixed(1)}s`)
+                
+                // Call onComplete after a delay to allow avatar to finish speaking
+                // The actual completion will be handled by TalkingHead's onSpeakingStateChange
+                setTimeout(() => {
+                    onComplete?.()
+                }, 100)
+                
             } catch (streamError) {
-                console.error('[useInterviewIntro] Streaming error:', streamError)
+                console.error('[useInterviewIntro] ❌ Streaming error:', streamError)
+                console.error('[useInterviewIntro] Error stack:', streamError)
                 throw streamError
             }
             
@@ -165,12 +226,6 @@ export function useInterviewIntro({
             // Abort any pending requests
             if (abortControllerRef.current) {
                 abortControllerRef.current.abort()
-            }
-            
-            // Stop and cleanup audio player
-            if (audioPlayerRef.current) {
-                audioPlayerRef.current.stop()
-                audioPlayerRef.current = null
             }
         }
     }, [])

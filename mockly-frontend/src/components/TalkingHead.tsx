@@ -107,15 +107,23 @@ export function TalkingHead({
       hasText: !!text
     })
     
-    if (!head || status !== 'ready' || !audioUrl) {
-      console.log('[TalkingHead] Skipping playback - missing requirements', {
-        hasHead: !!head,
-        status,
-        hasAudioUrl: !!audioUrl
-      })
+    if (!head) {
+      console.log('[TalkingHead] No head instance yet')
+      return
+    }
+    
+    if (status !== 'ready') {
+      console.log('[TalkingHead] Status not ready:', status)
+      return
+    }
+    
+    if (!audioUrl) {
+      console.log('[TalkingHead] No audio URL provided')
       return
     }
 
+    console.log('[TalkingHead] ✓ All requirements met, starting playback...')
+    
     let cancelled = false
 
     const playAudioWithLipsync = async () => {
@@ -134,18 +142,21 @@ export function TalkingHead({
 
         // Use TalkingHead's built-in speakAudio for automatic lipsync
         // This method handles everything: audio playback + lip sync
+        console.log('[TalkingHead] Calling head.speakAudio...')
         await (head as any).speakAudio(audioUrl, textForLipsync, {
           lipsyncLang: 'en',
         })
 
+        console.log('[TalkingHead] speakAudio completed')
+        
         if (!cancelled) {
           setIsSpeaking(false)
           setStatus('ready')
           onSpeakingStateChange?.(false)
-          console.log('[TalkingHead] Lipsync playback completed')
+          console.log('[TalkingHead] ✓ Lipsync playback completed')
         }
       } catch (err) {
-        console.error('[TalkingHead] Lipsync playback error:', err)
+        console.error('[TalkingHead] ❌ Lipsync playback error:', err)
         if (!cancelled) {
           setIsSpeaking(false)
           setStatus('ready')
@@ -154,9 +165,11 @@ export function TalkingHead({
       }
     }
 
+    console.log('[TalkingHead] Invoking playAudioWithLipsync...')
     playAudioWithLipsync()
 
     return () => {
+      console.log('[TalkingHead] Cleanup triggered')
       cancelled = true
       // Stop current speech
       try {
