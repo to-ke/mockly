@@ -22,7 +22,10 @@ from .evaluation import parse_evaluation_scores
 from .prompts import build_system_prompt_from_question
 from .questions import load_question_by_difficulty
 from .speech import sanitize_for_tts, sentence_chunks
-from .transcription import transcribe_prerecorded_deepgram
+from .transcription import (
+    transcribe_prerecorded_deepgram,
+    transcribe_prerecorded_deepgram_detailed,
+)
 from .tts import stream_deepgram_tts, stream_deepgram_tts_raw
 
 router = APIRouter(tags=["workflow"])
@@ -323,3 +326,41 @@ async def _handle_voice_payload(payload: dict) -> str:
     if not transcript:
         raise HTTPException(400, "Transcription returned empty text")
     return transcript
+
+
+@router.post("/stt/prerecorded_detailed")
+async def stt_prerecorded_detailed(payload: dict = Body(...)):
+    """
+    Transcribe prerecorded audio and return Deepgram `results` with
+    utterances and word timestamps when enabled.
+
+    Request body:
+    - audio_b64: base64-encoded audio bytes (required)
+    - mime: MIME type (default: audio/wav)
+    - utterances, diarize, smart_format: booleans (default: true)
+    """
+    b64_audio = payload.get("audio_b64")
+    if not b64_audio:
+        raise HTTPException(400, "Field 'audio_b64' is required.")
+    try:
+        audio_bytes = base64.b64decode(b64_audio)
+    except Exception as exc:
+        raise HTTPException(400, "audio_b64 is invalid base64") from exc
+
+    mime = (payload.get("mime") or "audio/wav").strip() or "audio/wav"
+    utterances = bool(payload.get("utterances", True))
+    diarize = bool(payload.get("diarize", True))
+    smart_format = bool(payload.get("smart_format", True))
+
+    try:
+        results = await transcribe_prerecorded_deepgram_detailed(
+            audio_bytes,
+            content_type=mime,
+            utterances=utterances,
+            diarize=diarize,
+            smart_format=smart_format,
+        )
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+    return {"results": results}
