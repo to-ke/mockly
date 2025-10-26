@@ -34,6 +34,71 @@ difficulties:
         hints:
           - "Store complements: for x at i, you need target - x seen earlier."
           - "One pass is enough; check before inserting current index."
+        starter_code: |
+          def twoSum(nums, target):
+              # Your code here
+              pass
+        language: "python"
+        starter_code_javascript: |
+          function twoSum(nums, target) {
+              // Your code here
+          }
+        starter_code_java: |
+          class Solution {
+              public int[] twoSum(int[] nums, int target) {
+                  // Your code here
+                  return new int[0];
+              }
+          }
+        starter_code_cpp: |
+          class Solution {
+          public:
+              vector<int> twoSum(vector<int>& nums, int target) {
+                  // Your code here
+                  return {};
+              }
+          };
+        starter_code_typescript: |
+          function twoSum(nums: number[], target: number): number[] {
+              // Your code here
+              return [];
+          }
+        starter_code_go: |
+          func twoSum(nums []int, target int) []int {
+              // Your code here
+              return []int{}
+          }
+        starter_code_c: |
+          int* twoSum(int* nums, int numsSize, int target, int* returnSize) {
+              // Your code here
+              *returnSize = 2;
+              return malloc(2 * sizeof(int));
+          }
+        starter_code_csharp: |
+          public class Solution {
+              public int[] TwoSum(int[] nums, int target) {
+                  // Your code here
+                  return new int[0];
+              }
+          }
+        starter_code_kotlin: |
+          class Solution {
+              fun twoSum(nums: IntArray, target: Int): IntArray {
+                  // Your code here
+                  return intArrayOf()
+              }
+          }
+        starter_code_ruby: |
+          def two_sum(nums, target)
+              # Your code here
+              []
+          end
+        starter_code_perl: |
+          sub two_sum {
+              my ($nums, $target) = @_;
+              # Your code here
+              return ();
+          }
 
   - difficulty: medium
     problems:
@@ -58,6 +123,72 @@ difficulties:
         hints:
           - "Sort first; for each i, move l/r toward center based on sum; skip duplicates for i, l, and r."
           - "Early break/continue: if nums[i] > 0 then stop; if i>0 and nums[i]==nums[i-1], continue."
+        starter_code: |
+          def threeSum(nums):
+              # Your code here
+              pass
+        language: "python"
+        starter_code_javascript: |
+          function threeSum(nums) {
+              // Your code here
+              return [];
+          }
+        starter_code_java: |
+          class Solution {
+              public List<List<Integer>> threeSum(int[] nums) {
+                  // Your code here
+                  return new ArrayList<>();
+              }
+          }
+        starter_code_cpp: |
+          class Solution {
+          public:
+              vector<vector<int>> threeSum(vector<int>& nums) {
+                  // Your code here
+                  return {};
+              }
+          };
+        starter_code_typescript: |
+          function threeSum(nums: number[]): number[][] {
+              // Your code here
+              return [];
+          }
+        starter_code_go: |
+          func threeSum(nums []int) [][]int {
+              // Your code here
+              return [][]int{}
+          }
+        starter_code_c: |
+          int** threeSum(int* nums, int numsSize, int* returnSize, int** returnColumnSizes) {
+              // Your code here
+              *returnSize = 0;
+              return NULL;
+          }
+        starter_code_csharp: |
+          public class Solution {
+              public IList<IList<int>> ThreeSum(int[] nums) {
+                  // Your code here
+                  return new List<IList<int>>();
+              }
+          }
+        starter_code_kotlin: |
+          class Solution {
+              fun threeSum(nums: IntArray): List<List<Int>> {
+                  // Your code here
+                  return listOf()
+              }
+          }
+        starter_code_ruby: |
+          def three_sum(nums)
+              # Your code here
+              []
+          end
+        starter_code_perl: |
+          sub three_sum {
+              my ($nums) = @_;
+              # Your code here
+              return ();
+          }
 
   - difficulty: hard
     problems:
@@ -77,3 +208,68 @@ difficulties:
         hints:
           - "Search cut i in smaller array; j = half - i. Compare borders L1,R1,L2,R2."
           - "Odd length: max(L1,L2); even length: average of max(L*) and min(R*)."
+        starter_code: |
+          def findMedianSortedArrays(nums1, nums2):
+              # Your code here
+              pass
+        language: "python"
+        starter_code_javascript: |
+          function findMedianSortedArrays(nums1, nums2) {
+              // Your code here
+              return 0;
+          }
+        starter_code_java: |
+          class Solution {
+              public double findMedianSortedArrays(int[] nums1, int[] nums2) {
+                  // Your code here
+                  return 0.0;
+              }
+          }
+        starter_code_cpp: |
+          class Solution {
+          public:
+              double findMedianSortedArrays(vector<int>& nums1, vector<int>& nums2) {
+                  // Your code here
+                  return 0.0;
+              }
+          };
+        starter_code_typescript: |
+          function findMedianSortedArrays(nums1: number[], nums2: number[]): number {
+              // Your code here
+              return 0;
+          }
+        starter_code_go: |
+          func findMedianSortedArrays(nums1 []int, nums2 []int) float64 {
+              // Your code here
+              return 0.0
+          }
+        starter_code_c: |
+          double findMedianSortedArrays(int* nums1, int nums1Size, int* nums2, int nums2Size) {
+              // Your code here
+              return 0.0;
+          }
+        starter_code_csharp: |
+          public class Solution {
+              public double FindMedianSortedArrays(int[] nums1, int[] nums2) {
+                  // Your code here
+                  return 0.0;
+              }
+          }
+        starter_code_kotlin: |
+          class Solution {
+              fun findMedianSortedArrays(nums1: IntArray, nums2: IntArray): Double {
+                  // Your code here
+                  return 0.0
+              }
+          }
+        starter_code_ruby: |
+          def find_median_sorted_arrays(nums1, nums2)
+              # Your code here
+              0.0
+          end
+        starter_code_perl: |
+          sub find_median_sorted_arrays {
+              my ($nums1, $nums2) = @_;
+              # Your code here
+              return 0.0;
+          }

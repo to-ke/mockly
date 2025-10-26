@@ -26,4 +26,7 @@ export default defineConfig({
       },
     },
   },
+  optimizeDeps: {
+    exclude: ['@met4citizen/talkinghead', 'lipsync-fi.mjs'],
+  },
 })
