@@ -38,7 +38,7 @@ class LiveTranscriptionWriter:
         sample_rate: int = 48000,
         encoding: str = "linear16",
         update_interval_seconds: float = 2.0,
-        min_audio_bytes: int = 96000,  # ~1 second at 48kHz 16-bit
+        min_audio_bytes: int = 192000,  # ~2 seconds at 48kHz 16-bit (was 96000)
     ):
         """
         Initialize the live transcription writer.
@@ -49,6 +49,7 @@ class LiveTranscriptionWriter:
             encoding: Audio encoding format
             update_interval_seconds: How often to update the JSON file
             min_audio_bytes: Minimum audio bytes before attempting transcription
+                           (192000 bytes = ~2 seconds at 48kHz 16-bit)
         """
         self.output_path = Path(output_path)
         self.sample_rate = sample_rate
@@ -94,8 +95,17 @@ class LiveTranscriptionWriter:
             duration_ms: Duration of this audio chunk in milliseconds
         """
         with self._lock:
+            before_size = self._audio_buffer.tell()
             self._audio_buffer.write(audio_bytes)
+            after_size = self._audio_buffer.tell()
             self._total_audio_duration_ms += duration_ms
+            
+            # Log periodically to track buffer growth
+            if after_size // 50000 != before_size // 50000:  # Log every ~50KB
+                logging.debug(
+                    f"[LiveTranscription] Buffer: {after_size} bytes "
+                    f"({self._total_audio_duration_ms/1000:.1f}s total audio)"
+                )
 
     def add_text_chunk(self, text: str) -> None:
         """
@@ -201,24 +211,25 @@ class LiveTranscriptionWriter:
         
         # For raw PCM audio, use query parameters for encoding
         # This is the correct way to send raw audio to Deepgram
+        # NOTE: All params must be strings for proper URL encoding
         if self.encoding.lower() in ("linear16", "pcm"):
             content_type = "audio/raw"
             params = {
                 "model": DEEPGRAM_STT_MODEL,
-                "punctuate": True,
-                "utterances": False,
-                "smart_format": True,
+                "punctuate": "true",  # String, not boolean
+                "utterances": "false",
+                "smart_format": "true",
                 "encoding": "linear16",
-                "sample_rate": self.sample_rate,
-                "channels": 1,
+                "sample_rate": str(self.sample_rate),  # Convert to string
+                "channels": "1",
             }
         else:
             content_type = "audio/wav"
             params = {
                 "model": DEEPGRAM_STT_MODEL,
-                "punctuate": True,
-                "utterances": False,
-                "smart_format": True,
+                "punctuate": "true",
+                "utterances": "false",
+                "smart_format": "true",
             }
         
         headers = {
@@ -227,6 +238,11 @@ class LiveTranscriptionWriter:
         }
         
         url = "https://api.deepgram.com/v1/listen"
+        
+        # Log the full request for debugging
+        logging.info(f"[LiveTranscription] Request URL: {url}")
+        logging.info(f"[LiveTranscription] Params: {params}")
+        logging.info(f"[LiveTranscription] Content-Type: {content_type}")
         
         try:
             async with httpx.AsyncClient(timeout=30) as client:
@@ -255,25 +271,36 @@ class LiveTranscriptionWriter:
         
         # Extract word timestamps
         try:
-            # Log the transcript to see if we got anything
-            transcript = (
-                data.get("results", {})
-                .get("channels", [{}])[0]
-                .get("alternatives", [{}])[0]
-                .get("transcript", "")
-            )
-            logging.info(f"[LiveTranscription] Transcript received: {transcript[:100]}")
+            # Log the full response structure for debugging
+            results = data.get("results", {})
+            channels = results.get("channels", [])
             
-            words_data = (
-                data.get("results", {})
-                .get("channels", [{}])[0]
-                .get("alternatives", [{}])[0]
-                .get("words", [])
-            )
+            if not channels:
+                logging.error("[LiveTranscription] No channels in Deepgram response")
+                logging.error(f"[LiveTranscription] Full response: {json.dumps(data, indent=2)}")
+                return []
+            
+            alternatives = channels[0].get("alternatives", [])
+            if not alternatives:
+                logging.error("[LiveTranscription] No alternatives in Deepgram response")
+                logging.error(f"[LiveTranscription] Full response: {json.dumps(data, indent=2)}")
+                return []
+            
+            # Log the transcript to see if we got anything
+            transcript = alternatives[0].get("transcript", "")
+            logging.info(f"[LiveTranscription] Transcript received: '{transcript}'")
+            
+            if not transcript or transcript.strip() == "":
+                logging.warning("[LiveTranscription] Empty transcript - audio may be silent or too short")
+                logging.info(f"[LiveTranscription] Audio was {len(audio_data)} bytes = {len(audio_data)/96000:.2f} seconds at 48kHz")
+                return []
+            
+            words_data = alternatives[0].get("words", [])
             
             if not words_data:
-                logging.warning("[LiveTranscription] No words in Deepgram response")
-                logging.debug(f"[LiveTranscription] Full response: {data}")
+                logging.warning("[LiveTranscription] No words in Deepgram response despite having transcript")
+                logging.warning(f"[LiveTranscription] Transcript was: '{transcript}'")
+                logging.debug(f"[LiveTranscription] Full response: {json.dumps(data, indent=2)}")
                 return []
             
             word_list = []

@@ -191,10 +191,12 @@ async def stream_deepgram_tts(sentences) -> AsyncIterator[bytes]:
                 encoding=str(DEEPGRAM_STREAM_ENCODING),
                 update_interval_seconds=LIVE_TRANSCRIPTION_UPDATE_INTERVAL,
             )
-            logging.info("[Deepgram TTS] Live transcription enabled for lip sync")
+            logging.info(f"[Deepgram TTS] ✅ Live transcription ENABLED: path={LIVE_TRANSCRIPTION_PATH}, encoding={DEEPGRAM_STREAM_ENCODING}")
         except Exception as exc:
-            logging.error("[Deepgram TTS] Failed to init transcription: %s", exc)
+            logging.error(f"[Deepgram TTS] ❌ Failed to init transcription: {exc}", exc_info=True)
             transcription = None
+    else:
+        logging.warning("[Deepgram TTS] Live transcription DISABLED: LIVE_TRANSCRIPTION_PATH not set")
 
     def on_message(msg):
         if isinstance(msg, (bytes, bytearray)):
@@ -332,10 +334,12 @@ async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[byt
                 encoding=str(DEEPGRAM_STREAM_ENCODING),
                 update_interval_seconds=LIVE_TRANSCRIPTION_UPDATE_INTERVAL,
             )
-            logging.info("[Deepgram TTS raw] Live transcription enabled for lip sync")
+            logging.info(f"[Deepgram TTS raw] ✅ Live transcription ENABLED: path={LIVE_TRANSCRIPTION_PATH}, encoding={DEEPGRAM_STREAM_ENCODING}")
         except Exception as exc:
-            logging.error("[Deepgram TTS raw] Failed to init transcription: %s", exc)
+            logging.error(f"[Deepgram TTS raw] ❌ Failed to init transcription: {exc}", exc_info=True)
             transcription = None
+    else:
+        logging.warning("[Deepgram TTS raw] Live transcription DISABLED: LIVE_TRANSCRIPTION_PATH not set")
 
     async with connect_ctx as ws:  # type: ignore
         logging.info("[Deepgram TTS raw] WebSocket connected successfully")
@@ -429,6 +433,11 @@ async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[byt
                         transcription.add_audio_chunk(frame, _pcm_duration_ms(len(frame), DEEPGRAM_SAMPLE_RATE))
                         # Periodically trigger transcription update
                         await transcription.maybe_update()
+                    elif audio_chunks_received == 1:  # Log once at start
+                        if not transcription:
+                            logging.warning("[Deepgram TTS raw] Transcription not initialized - check LIVE_TRANSCRIPTION_PATH")
+                        elif str(DEEPGRAM_STREAM_ENCODING).lower() != "linear16":
+                            logging.warning(f"[Deepgram TTS raw] Wrong encoding for transcription: {DEEPGRAM_STREAM_ENCODING} (need linear16)")
                     
                     yield frame
                     continue
