@@ -23,6 +23,8 @@ declare module '@met4citizen/talkinghead' {
   export class TalkingHead {
     constructor(container: HTMLElement, options?: TalkingHeadOptions)
     showAvatar(options: TalkingHeadShowAvatarOptions): Promise<void>
+    speakAudio(audioUrl: string, text: string, options?: { lipsyncLang?: string }): Promise<void>
+    speakText(text: string, options?: Record<string, unknown>): Promise<void>
     stop(): void
     stopSpeaking(): void
     streamStop(): void

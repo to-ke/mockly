@@ -3,11 +3,14 @@ import { TalkingHead as TalkingHeadEngine } from '@met4citizen/talkinghead'
 import { defaultTalkingHeadModelUrl } from '@/lib/talkingHeadPreload'
 import { cn } from '@/lib/cn'
 
-type TalkingHeadStatus = 'idle' | 'loading' | 'ready' | 'error'
+type TalkingHeadStatus = 'idle' | 'loading' | 'ready' | 'error' | 'speaking'
 
 type TalkingHeadProps = {
   modelUrl?: string
   className?: string
+  audioUrl?: string | null
+  text?: string | null
+  onSpeakingStateChange?: (speaking: boolean) => void
 }
 
 const REQUIRED_MORPH_TARGETS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthSmileLeft', 'mouthSmileRight']
@@ -23,11 +26,18 @@ function validateMorphTargets(head: TalkingHeadEngine): string | null {
   return null
 }
 
-export function TalkingHead({ modelUrl = DEFAULT_MODEL_URL, className }: TalkingHeadProps) {
+export function TalkingHead({ 
+  modelUrl = DEFAULT_MODEL_URL, 
+  className,
+  audioUrl,
+  text,
+  onSpeakingStateChange 
+}: TalkingHeadProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const headRef = useRef<TalkingHeadEngine | null>(null)
   const [status, setStatus] = useState<TalkingHeadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
+  const [isSpeaking, setIsSpeaking] = useState(false)
 
   useEffect(() => {
     const container = containerRef.current
@@ -85,9 +95,87 @@ export function TalkingHead({ modelUrl = DEFAULT_MODEL_URL, className }: Talking
     }
   }, [modelUrl])
 
+  // Handle audio playback with lipsync using TalkingHead's built-in speakAudio
+  useEffect(() => {
+    const head = headRef.current
+    
+    console.log('[TalkingHead] Effect triggered', {
+      hasHead: !!head,
+      status,
+      audioUrl: audioUrl?.substring(0, 50),
+      textLength: text?.length || 0,
+      hasText: !!text
+    })
+    
+    if (!head || status !== 'ready' || !audioUrl) {
+      console.log('[TalkingHead] Skipping playback - missing requirements', {
+        hasHead: !!head,
+        status,
+        hasAudioUrl: !!audioUrl
+      })
+      return
+    }
+
+    let cancelled = false
+
+    const playAudioWithLipsync = async () => {
+      try {
+        setIsSpeaking(true)
+        setStatus('speaking')
+        onSpeakingStateChange?.(true)
+
+        const textForLipsync = text || ''
+        
+        console.log('[TalkingHead] ▶ Starting lipsync playback', { 
+          audioUrl: audioUrl.substring(0, 80),
+          textPreview: textForLipsync.substring(0, 100),
+          textLength: textForLipsync.length
+        })
+
+        // Use TalkingHead's built-in speakAudio for automatic lipsync
+        // This method handles everything: audio playback + lip sync
+        await (head as any).speakAudio(audioUrl, textForLipsync, {
+          lipsyncLang: 'en',
+        })
+
+        if (!cancelled) {
+          setIsSpeaking(false)
+          setStatus('ready')
+          onSpeakingStateChange?.(false)
+          console.log('[TalkingHead] Lipsync playback completed')
+        }
+      } catch (err) {
+        console.error('[TalkingHead] Lipsync playback error:', err)
+        if (!cancelled) {
+          setIsSpeaking(false)
+          setStatus('ready')
+          onSpeakingStateChange?.(false)
+        }
+      }
+    }
+
+    playAudioWithLipsync()
+
+    return () => {
+      cancelled = true
+      // Stop current speech
+      try {
+        (head as any).stopSpeaking?.()
+      } catch (err) {
+        // Ignore errors on cleanup
+      }
+      setIsSpeaking(false)
+      if (status === 'speaking') {
+        setStatus('ready')
+        onSpeakingStateChange?.(false)
+      }
+    }
+  }, [audioUrl, text, status, onSpeakingStateChange])
+
   const overlayMessage = (() => {
     if (status === 'error' && error) return error
     if (status === 'loading' || status === 'idle') return 'Loading avatar…'
+    if (status === 'speaking') return null // No overlay when speaking
     return null
   })()
 

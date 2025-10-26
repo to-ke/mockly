@@ -262,6 +262,15 @@ class LiveTranscriptionWriter:
                     return []
                 
                 data = response.json()
+                
+                # DEBUG: Save response to file for inspection
+                try:
+                    with open("deepgram_response_debug.json", "w") as f:
+                        json.dump(data, f, indent=2)
+                    logging.info("[LiveTranscription] Saved Deepgram response to deepgram_response_debug.json")
+                except Exception:
+                    pass
+                    
         except httpx.HTTPStatusError as exc:
             logging.error(f"[LiveTranscription] HTTP error {exc.response.status_code}: {exc.response.text}")
             return []

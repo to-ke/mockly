@@ -53,9 +53,15 @@ export function FloatingPane() {
     // Voice and transcription state
     const { difficulty, stage } = useAppState()
     const { lastPrompt } = useSession()
-    const { recordingState, audioError } = useVoice()
+    const { recordingState, audioError, audioUrl: voiceAudioUrl } = useVoice()
     const [pushToTalkEnabled, setPushToTalkEnabled] = useState(false)
     const [transcriptExpanded, setTranscriptExpanded] = useState(false)
+    
+    // State for TalkingHead lipsync
+    const [currentText, setCurrentText] = useState<string | null>(null)
+    const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null)
+    const [avatarSpeaking, setAvatarSpeaking] = useState(false)
+    const lastFetchedTimestamp = useRef<number>(0)
     
     const apiBase = resolveBackendBase()
     
@@ -111,6 +117,83 @@ export function FloatingPane() {
             return () => clearTimeout(timer)
         }
     }, [stage, lastPrompt, hasPlayedIntro, isPlayingIntro, playIntroduction])
+    
+    // Fetch text and set audio URL for TalkingHead lipsync when audio becomes available
+    useEffect(() => {
+        if (!voiceAudioUrl) {
+            console.log('[FloatingPane] No audioUrl, clearing lipsync state')
+            setCurrentText(null)
+            setCurrentAudioUrl(null)
+            return
+        }
+        
+        console.log('[FloatingPane] audioUrl changed, fetching text for lipsync...', {
+            audioUrl: voiceAudioUrl.substring(0, 50)
+        })
+        
+        let cancelled = false
+        
+        const fetchTextAndSetAudio = async () => {
+            try {
+                // Wait a tiny bit to ensure backend has stored the text
+                await new Promise(resolve => setTimeout(resolve, 100))
+                
+                const response = await fetch(`${apiBase}/workflow/text/last`)
+                if (!response.ok) {
+                    console.error('[FloatingPane] Failed to fetch text:', response.status, response.statusText)
+                    // Still play audio without lipsync
+                    if (!cancelled) {
+                        setCurrentAudioUrl(voiceAudioUrl)
+                        setCurrentText('')
+                    }
+                    return
+                }
+                
+                const data = await response.json()
+                
+                if (cancelled) return
+                
+                // Check if this is newer than what we last fetched
+                if (data.timestamp <= lastFetchedTimestamp.current) {
+                    console.warn('[FloatingPane] Received stale text, ignoring', {
+                        receivedTimestamp: data.timestamp,
+                        lastFetched: lastFetchedTimestamp.current
+                    })
+                    return
+                }
+                
+                lastFetchedTimestamp.current = data.timestamp
+                
+                if (data.text) {
+                    console.log('[FloatingPane] ✓ Got text for lipsync:', {
+                        textPreview: data.text.substring(0, 100),
+                        textLength: data.text.length,
+                        timestamp: data.timestamp
+                    })
+                    setCurrentText(data.text)
+                    setCurrentAudioUrl(voiceAudioUrl)
+                } else {
+                    console.warn('[FloatingPane] No text in response:', data)
+                    // Still play audio without lipsync
+                    setCurrentAudioUrl(voiceAudioUrl)
+                    setCurrentText('')
+                }
+            } catch (error) {
+                console.error('[FloatingPane] Failed to fetch text:', error)
+                // Still play audio without lipsync
+                if (!cancelled) {
+                    setCurrentAudioUrl(voiceAudioUrl)
+                    setCurrentText('')
+                }
+            }
+        }
+        
+        fetchTextAndSetAudio()
+        
+        return () => {
+            cancelled = true
+        }
+    }, [voiceAudioUrl, apiBase])
     
     // Push-to-talk functionality
     const { isRecording, isProcessing, isPlaying } = usePushToTalk({
@@ -409,7 +492,11 @@ export function FloatingPane() {
             )}
 
             <div className="relative aspect-video w-full overflow-hidden bg-muted">
-                <TalkingHead />
+                <TalkingHead 
+                    audioUrl={currentAudioUrl}
+                    text={currentText}
+                    onSpeakingStateChange={setAvatarSpeaking}
+                />
             </div>
             
             {/* Live Transcript Section */}

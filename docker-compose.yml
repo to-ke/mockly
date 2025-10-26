@@ -12,6 +12,10 @@ services:
       - PORT=8000
     ports:
       - "8000:8000"
+    # DNS configuration to resolve external APIs like Deepgram
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     # (removed bind mount) Use the image's copied files so the built
     # image's /app (including workflow/) is used. For development you
     # can re-enable a bind mount, but ensure the host folder contains
