@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { PCMAudioPlayer } from '@/services/pcmAudioPlayer'
+import { pcmToWav } from '@/services/voiceService'
 import type { Difficulty } from '@/stores/app'
 
 interface UseInterviewIntroOptions {
@@ -25,6 +26,7 @@ export function useInterviewIntro({
 }: UseInterviewIntroOptions) {
     const [isPlaying, setIsPlaying] = useState(false)
     const [hasPlayed, setHasPlayed] = useState(false)
+    const [audioUrl, setAudioUrl] = useState<string | null>(null)
     const audioPlayerRef = useRef<PCMAudioPlayer | null>(null)
     const abortControllerRef = useRef<AbortController | null>(null)
     
@@ -80,8 +82,9 @@ export function useInterviewIntro({
             }
             
             // Initialize audio player for progressive playback
+            // ElevenLabs outputs PCM at 16kHz
             if (!audioPlayerRef.current) {
-                audioPlayerRef.current = new PCMAudioPlayer(48000, 1)
+                audioPlayerRef.current = new PCMAudioPlayer(16000, 1)
             }
             
             const audioPlayer = audioPlayerRef.current
@@ -109,6 +112,7 @@ export function useInterviewIntro({
             const reader = response.body.getReader()
             let receivedBytes = 0
             let chunkCount = 0
+            const audioChunks: Uint8Array[] = []
             
             try {
                 while (true) {
@@ -122,6 +126,9 @@ export function useInterviewIntro({
                     
                     chunkCount++
                     receivedBytes += value.byteLength
+                    
+                    // Store chunk for blob creation
+                    audioChunks.push(value)
                     
                     // Log progress every 100KB
                     if (chunkCount === 1 || receivedBytes % 100000 < value.byteLength) {
@@ -137,7 +144,22 @@ export function useInterviewIntro({
                     }
                 }
                 
-                console.log(`[useInterviewIntro] Audio duration: ~${(receivedBytes / (48000 * 2)).toFixed(1)}s at 48kHz mono`)
+                // Create blob URL for TalkingHeadSync
+                const totalLength = audioChunks.reduce((acc, chunk) => acc + chunk.byteLength, 0)
+                const pcmBuffer = new ArrayBuffer(totalLength)
+                const pcmView = new Uint8Array(pcmBuffer)
+                let offset = 0
+                for (const chunk of audioChunks) {
+                    pcmView.set(chunk, offset)
+                    offset += chunk.byteLength
+                }
+                
+                const wavBlob = await pcmToWav(pcmBuffer, 16000, 1, 16)
+                const blobUrl = URL.createObjectURL(wavBlob)
+                setAudioUrl(blobUrl)
+                console.log(`[useInterviewIntro] Created blob URL for TalkingHeadSync`)
+                
+                console.log(`[useInterviewIntro] Audio duration: ~${(receivedBytes / (16000 * 2)).toFixed(1)}s at 16kHz mono`)
             } catch (streamError) {
                 console.error('[useInterviewIntro] Streaming error:', streamError)
                 throw streamError
@@ -172,12 +194,18 @@ export function useInterviewIntro({
                 audioPlayerRef.current.stop()
                 audioPlayerRef.current = null
             }
+            
+            // Revoke blob URL
+            if (audioUrl) {
+                URL.revokeObjectURL(audioUrl)
+            }
         }
-    }, [])
+    }, [audioUrl])
     
     return {
         isPlaying,
         hasPlayed,
+        audioUrl,
         playIntroduction,
     }
 }

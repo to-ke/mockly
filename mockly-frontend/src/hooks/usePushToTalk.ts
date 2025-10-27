@@ -28,6 +28,7 @@ export function usePushToTalk({
 }: UsePushToTalkOptions) {
     const {
         recordingState,
+        audioUrl,
         startRecording,
         stopRecording,
         setProcessing,
@@ -37,7 +38,6 @@ export function usePushToTalk({
     } = useVoice()
     
     const voiceServiceRef = useRef<VoiceService | null>(null)
-    const audioRef = useRef<HTMLAudioElement | null>(null)
     const isKeyDownRef = useRef(false)
     
     // Initialize voice service
@@ -81,33 +81,15 @@ export function usePushToTalk({
             )
             
             // Convert PCM to WAV for playback
+            // ElevenLabs outputs PCM at 16kHz
             const arrayBuffer = await responseAudio.arrayBuffer()
-            const wavBlob = await pcmToWav(arrayBuffer, 48000, 1, 16)
+            const wavBlob = await pcmToWav(arrayBuffer, 16000, 1, 16)
             
-            // Create audio URL and play
+            // Create audio URL for TalkingHead to play
             const audioUrl = URL.createObjectURL(wavBlob)
             setAudioUrl(audioUrl)
-            
-            // Play audio
-            if (!audioRef.current) {
-                audioRef.current = new Audio()
-            }
-            
-            audioRef.current.src = audioUrl
-            audioRef.current.onplay = () => setPlaying(true)
-            audioRef.current.onended = () => {
-                setPlaying(false)
-                setProcessing(false)
-                onSuccess?.()
-            }
-            audioRef.current.onerror = () => {
-                const message = 'Failed to play audio response'
-                setAudioError(message)
-                setProcessing(false)
-                onError?.(message)
-            }
-            
-            await audioRef.current.play()
+            setPlaying(true)
+            setProcessing(false)
             
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to process audio'
@@ -183,10 +165,6 @@ export function usePushToTalk({
             if (voiceServiceRef.current) {
                 voiceServiceRef.current.cancelRecording()
             }
-            if (audioRef.current) {
-                audioRef.current.pause()
-                audioRef.current.src = ''
-            }
         }
     }, [])
     
@@ -195,6 +173,7 @@ export function usePushToTalk({
         isRecording: recordingState === 'recording',
         isProcessing: recordingState === 'processing',
         isPlaying: recordingState === 'playing',
+        audioUrl,
         startRecording: handleStartRecording,
         stopRecording: handleStopRecording,
     }

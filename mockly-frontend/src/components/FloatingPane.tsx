@@ -4,7 +4,7 @@ import { Button } from '@/components/Button'
 import { cn } from '@/lib/cn'
 import { AudioStreamer } from '@/services/audioStreamer'
 import { resolveBackendBase } from '@/services/api'
-import { TalkingHead } from '@/components/TalkingHead'
+import { TalkingHeadSync } from '@/components/TalkingHeadSync'
 import { LiveTranscript } from '@/components/LiveTranscript'
 import { useSession } from '@/stores/session'
 import { useAppState } from '@/stores/app'
@@ -49,18 +49,18 @@ export function FloatingPane() {
     const [micMuted, setMicMuted] = useState(true)
     const [micBusy, setMicBusy] = useState(false)
     const [micError, setMicError] = useState<string | null>(null)
-    
+
     // Voice and transcription state
     const { difficulty, stage } = useAppState()
     const { lastPrompt } = useSession()
-    const { recordingState, audioError } = useVoice()
+    const { recordingState, audioError, setPlaying: setVoicePlaying } = useVoice()
     const [pushToTalkEnabled, setPushToTalkEnabled] = useState(false)
     const [transcriptExpanded, setTranscriptExpanded] = useState(false)
-    
+
     const apiBase = resolveBackendBase()
-    
+
     // Automatic interview introduction
-    const { isPlaying: isPlayingIntro, hasPlayed: hasPlayedIntro, playIntroduction } = useInterviewIntro({
+    const { isPlaying: isPlayingIntro, hasPlayed: hasPlayedIntro, audioUrl: introAudioUrl, playIntroduction } = useInterviewIntro({
         apiBase,
         difficulty,
         questionContext: lastPrompt,
@@ -98,7 +98,7 @@ export function FloatingPane() {
             ])
         },
     })
-    
+
     // Trigger introduction when interview starts and question is loaded
     useEffect(() => {
         if (stage === 'interview' && lastPrompt && !hasPlayedIntro && !isPlayingIntro) {
@@ -107,13 +107,13 @@ export function FloatingPane() {
                 console.log('[FloatingPane] Triggering introduction for:', lastPrompt.substring(0, 50))
                 playIntroduction()
             }, 100)
-            
+
             return () => clearTimeout(timer)
         }
     }, [stage, lastPrompt, hasPlayedIntro, isPlayingIntro, playIntroduction])
-    
+
     // Push-to-talk functionality
-    const { isRecording, isProcessing, isPlaying } = usePushToTalk({
+    const { isRecording, isProcessing, isPlaying, audioUrl: pttAudioUrl } = usePushToTalk({
         apiBase,
         key: 'v',
         difficulty,
@@ -134,7 +134,7 @@ export function FloatingPane() {
             // Could add success feedback here
         },
     })
-    
+
     const ensureAudioStreamer = useCallback(() => {
         if (!audioStreamerRef.current) {
             audioStreamerRef.current = new AudioStreamer()
@@ -322,151 +322,156 @@ export function FloatingPane() {
             style={{ transform: `translate3d(${position.x}px, ${position.y}px, 0)` }}
         >
             <div className="floating-pop-panel flex flex-col overflow-hidden rounded-2xl border border-border bg-surface shadow-2xl">
-            <div
-                className={cn(
-                    'flex select-none items-center justify-between gap-2 border-b border-border px-3 py-2',
-                    'cursor-grab active:cursor-grabbing',
-                    isDragging && 'cursor-grabbing'
-                )}
-                onPointerDown={handlePointerDown}
-            >
-                <span className="text-sm font-semibold text-foreground">Kevin (Interviewer)</span>
-                <div className="flex items-center gap-2">
-                    <Button
-                        variant={pushToTalkEnabled ? 'default' : 'outline'}
-                        size="sm"
-                        className="h-8 px-3 text-xs"
-                        onClick={(e) => {
-                            e.stopPropagation()
-                            setPushToTalkEnabled((prev) => !prev)
-                        }}
-                        title="Enable push-to-talk (hold V key to record)"
-                    >
-                        {pushToTalkEnabled ? (
-                            <>
-                                <Radio className="mr-1 h-3 w-3" /> PTT On
-                            </>
-                        ) : (
-                            <>
-                                <Radio className="mr-1 h-3 w-3" /> PTT Off
-                            </>
-                        )}
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 px-2 text-xs"
-                        onClick={(event) => {
-                            event.stopPropagation()
-                            setChatOpen((prev) => !prev)
-                        }}
-                    >
-                        Messages {chatOpen ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
-                    </Button>
-                </div>
-            </div>
-
-            {statusMessage && (
-                <div className="border-b border-destructive/30 bg-destructive/10 px-3 py-1 text-xs text-destructive">
-                    {statusMessage}
-                </div>
-            )}
-            
-            {/* Status indicator for intro or PTT */}
-            {(pushToTalkEnabled || isPlayingIntro) && (
-                <div className={cn(
-                    'border-b border-border px-3 py-1.5 text-xs',
-                    pushToTalkActive ? 'bg-primary/10 text-primary' : 'bg-muted/30 text-muted-foreground'
-                )}>
-                    {isPlayingIntro && (
-                        <span className="flex items-center gap-2">
-                            <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-                            Introducing the problem...
-                        </span>
+                <div
+                    className={cn(
+                        'flex select-none items-center justify-between gap-2 border-b border-border px-3 py-2',
+                        'cursor-grab active:cursor-grabbing',
+                        isDragging && 'cursor-grabbing'
                     )}
-                    {!isPlayingIntro && isRecording && (
-                        <span className="flex items-center gap-2">
-                            <span className="inline-block h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                            Recording... (hold V)
-                        </span>
-                    )}
-                    {!isPlayingIntro && isProcessing && (
-                        <span className="flex items-center gap-2">
-                            <span className="inline-block h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
-                            Processing...
-                        </span>
-                    )}
-                    {!isPlayingIntro && isPlaying && (
-                        <span className="flex items-center gap-2">
-                            <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-                            Playing response...
-                        </span>
-                    )}
-                    {!pushToTalkActive && pushToTalkEnabled && (
-                        <span className="italic">Press and hold V to speak</span>
-                    )}
-                </div>
-            )}
-
-            <div className="relative aspect-video w-full overflow-hidden bg-muted">
-                <TalkingHead />
-            </div>
-            
-            {/* Live Transcript Section */}
-            {pushToTalkEnabled && (
-                <div className="border-t border-border">
-                    <button
-                        className="w-full px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-muted/30 transition-colors flex items-center justify-between"
-                        onClick={() => setTranscriptExpanded((prev) => !prev)}
-                    >
-                        <span>Live Transcript</span>
-                        {transcriptExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                    </button>
-                    {transcriptExpanded && (
-                        <div className="px-3 pb-3">
-                            <LiveTranscript apiBase={apiBase} />
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${chatOpen ? 'grid-rows-[1fr_auto]' : 'grid-rows-[0fr]'}`}>
-                <div className="min-h-0 overflow-hidden">
-                    <div ref={chatBodyRef} className="flex max-h-64 min-h-0 flex-col gap-3 overflow-y-auto px-3 py-3">
-                        {messages.map(({ id, role, content }) => (
-                            <div
-                                key={id}
-                                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'mr-auto bg-accent text-accent-foreground'}`}
-                            >
-                                {role === 'assistant' ? (
-                                    <div
-                                        className="space-y-1 leading-relaxed [&_strong]:font-semibold"
-                                        dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
-                                    />
-                                ) : (
-                                    content
-                                )}
-                            </div>
-                        ))}
-                    </div>
-                </div>
-                <form
-                    onSubmit={handleSendMessage}
-                    className={`border-t border-border bg-surface px-3 py-2 ${chatOpen ? 'visible opacity-100' : 'invisible opacity-0'} transition-opacity duration-200`}
+                    onPointerDown={handlePointerDown}
                 >
+                    <span className="text-sm font-semibold text-foreground">Kevin (Interviewer)</span>
                     <div className="flex items-center gap-2">
-                        <input
-                            value={draft}
-                            onChange={(event) => setDraft(event.target.value)}
-                            placeholder="Type a message…"
-                            className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/60"
-                        />
-                        <Button type="submit" size="sm" className="h-10 px-3" aria-label="Send message">
-                            <Send className="h-4 w-4" />
+                        <Button
+                            variant={pushToTalkEnabled ? 'default' : 'outline'}
+                            size="sm"
+                            className="h-8 px-3 text-xs"
+                            onClick={(e) => {
+                                e.stopPropagation()
+                                setPushToTalkEnabled((prev) => !prev)
+                            }}
+                            title="Enable push-to-talk (hold V key to record)"
+                        >
+                            {pushToTalkEnabled ? (
+                                <>
+                                    <Radio className="mr-1 h-3 w-3" /> PTT On
+                                </>
+                            ) : (
+                                <>
+                                    <Radio className="mr-1 h-3 w-3" /> PTT Off
+                                </>
+                            )}
+                        </Button>
+                        <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 px-2 text-xs"
+                            onClick={(event) => {
+                                event.stopPropagation()
+                                setChatOpen((prev) => !prev)
+                            }}
+                        >
+                            Messages {chatOpen ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
                         </Button>
                     </div>
-                </form>
-            </div>
+                </div>
+
+                {statusMessage && (
+                    <div className="border-b border-destructive/30 bg-destructive/10 px-3 py-1 text-xs text-destructive">
+                        {statusMessage}
+                    </div>
+                )}
+
+                {/* Status indicator for intro or PTT */}
+                {(pushToTalkEnabled || isPlayingIntro) && (
+                    <div className={cn(
+                        'border-b border-border px-3 py-1.5 text-xs',
+                        pushToTalkActive ? 'bg-primary/10 text-primary' : 'bg-muted/30 text-muted-foreground'
+                    )}>
+                        {isPlayingIntro && (
+                            <span className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                                Introducing the problem...
+                            </span>
+                        )}
+                        {!isPlayingIntro && isRecording && (
+                            <span className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 rounded-full bg-red-500 animate-pulse" />
+                                Recording... (hold V)
+                            </span>
+                        )}
+                        {!isPlayingIntro && isProcessing && (
+                            <span className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
+                                Processing...
+                            </span>
+                        )}
+                        {!isPlayingIntro && isPlaying && (
+                            <span className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+                                Playing response...
+                            </span>
+                        )}
+                        {!pushToTalkActive && pushToTalkEnabled && (
+                            <span className="italic">Press and hold V to speak</span>
+                        )}
+                    </div>
+                )}
+
+                <div className="relative aspect-video w-full overflow-hidden bg-muted">
+                    <TalkingHeadSync
+                        audioUrl={introAudioUrl || pttAudioUrl}
+                        enableSync={true}
+                        onSpeakingStateChange={(speaking) => {
+                            setVoicePlaying(speaking)
+                        }}
+                    />
+                </div>
+                {/* Live Transcript Section */}
+                {pushToTalkEnabled && (
+                    <div className="border-t border-border">
+                        <button
+                            className="w-full px-3 py-2 text-left text-xs font-medium text-foreground hover:bg-muted/30 transition-colors flex items-center justify-between"
+                            onClick={() => setTranscriptExpanded((prev) => !prev)}
+                        >
+                            <span>Live Transcript</span>
+                            {transcriptExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                        </button>
+                        {transcriptExpanded && (
+                            <div className="px-3 pb-3">
+                                <LiveTranscript apiBase={apiBase} />
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${chatOpen ? 'grid-rows-[1fr_auto]' : 'grid-rows-[0fr]'}`}>
+                    <div className="min-h-0 overflow-hidden">
+                        <div ref={chatBodyRef} className="flex max-h-64 min-h-0 flex-col gap-3 overflow-y-auto px-3 py-3">
+                            {messages.map(({ id, role, content }) => (
+                                <div
+                                    key={id}
+                                    className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm ${role === 'user' ? 'ml-auto bg-primary text-primary-foreground' : 'mr-auto bg-accent text-accent-foreground'}`}
+                                >
+                                    {role === 'assistant' ? (
+                                        <div
+                                            className="space-y-1 leading-relaxed [&_strong]:font-semibold"
+                                            dangerouslySetInnerHTML={{ __html: renderMarkdown(content) }}
+                                        />
+                                    ) : (
+                                        content
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                    <form
+                        onSubmit={handleSendMessage}
+                        className={`border-t border-border bg-surface px-3 py-2 ${chatOpen ? 'visible opacity-100' : 'invisible opacity-0'} transition-opacity duration-200`}
+                    >
+                        <div className="flex items-center gap-2">
+                            <input
+                                value={draft}
+                                onChange={(event) => setDraft(event.target.value)}
+                                placeholder="Type a message…"
+                                className="flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/60"
+                            />
+                            <Button type="submit" size="sm" className="h-10 px-3" aria-label="Send message">
+                                <Send className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </form>
+                </div>
             </div>
         </div>
     )

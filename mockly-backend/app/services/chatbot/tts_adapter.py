@@ -206,8 +206,9 @@ class ElevenLabsTTSAdapter:
         logger.info(f"[ElevenLabs TTS] Synthesizing {len(full_text)} characters across {len(sentence_buffer)} sentences")
 
         try:
-            # Use streaming API for low latency
-            audio_stream = client.text_to_speech.convert_as_stream(
+            # Use convert() for streaming audio
+            # Note: convert_with_timestamps() doesn't stream, it returns everything at once
+            audio_stream = client.text_to_speech.convert(
                 voice_id=ELEVENLABS_VOICE_ID,
                 text=full_text,
                 model_id=ELEVENLABS_MODEL,
@@ -218,6 +219,7 @@ class ElevenLabsTTSAdapter:
             chunk_count = 0
             start_time = time.perf_counter()
 
+            # Stream audio chunks
             for chunk in audio_stream:
                 if chunk:
                     total_bytes += len(chunk)
@@ -226,7 +228,6 @@ class ElevenLabsTTSAdapter:
                         first_chunk_time = time.perf_counter() - start_time
                         logger.info(f"[ElevenLabs TTS] First audio chunk after {first_chunk_time*1000:.1f}ms")
                     yield chunk
-                    # Allow other async tasks to run
                     await asyncio.sleep(0)
 
             elapsed = time.perf_counter() - start_time

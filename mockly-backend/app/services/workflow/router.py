@@ -28,7 +28,7 @@ from .transcription import (
 )
 from .tts import stream_deepgram_tts, stream_deepgram_tts_raw, stream_elevenlabs_tts
 
-router = APIRouter(prefix="/workflow", tags=["workflow"])
+router = APIRouter(prefix="/api/workflow", tags=["workflow"])
 
 
 def _resolve_question(payload: dict) -> dict | None:
@@ -457,6 +457,7 @@ async def get_live_captions():
             "status": "active" if words else "no_data",
             "last_updated": last_updated,
             "word_count": len(words),
+            "source": data.get("source", "unknown"),
         }
     
     except FileNotFoundError:

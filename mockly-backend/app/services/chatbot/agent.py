@@ -10,6 +10,7 @@ import asyncio
 
 from .claude_client import ClaudeClient
 from .prompts import build_system_prompt_from_question
+from .tts_adapter import DeepgramTTSAdapter
 
 
 def sentence_chunks(token_iter: Iterable[str], min_chars: int = 24, first_flush_ms: int = 900) -> Iterable[str]:

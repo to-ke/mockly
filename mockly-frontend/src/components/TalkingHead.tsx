@@ -8,6 +8,7 @@ type TalkingHeadStatus = 'idle' | 'loading' | 'ready' | 'error'
 type TalkingHeadProps = {
   modelUrl?: string
   className?: string
+  isSpeaking?: boolean
 }
 
 const REQUIRED_MORPH_TARGETS = ['eyeBlinkLeft', 'eyeBlinkRight', 'jawOpen', 'mouthSmileLeft', 'mouthSmileRight']
@@ -23,9 +24,10 @@ function validateMorphTargets(head: TalkingHeadEngine): string | null {
   return null
 }
 
-export function TalkingHead({ modelUrl = DEFAULT_MODEL_URL, className }: TalkingHeadProps) {
+export function TalkingHead({ modelUrl = DEFAULT_MODEL_URL, className, isSpeaking = false }: TalkingHeadProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const headRef = useRef<TalkingHeadEngine | null>(null)
+  const animationFrameRef = useRef<number | null>(null)
   const [status, setStatus] = useState<TalkingHeadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
 
@@ -80,10 +82,71 @@ export function TalkingHead({ modelUrl = DEFAULT_MODEL_URL, className }: Talking
 
     return () => {
       disposed = true
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current)
+        animationFrameRef.current = null
+      }
       headRef.current?.dispose()
       headRef.current = null
     }
   }, [modelUrl])
+
+  // Animate mouth when speaking
+  useEffect(() => {
+    const head = headRef.current
+    if (!head || status !== 'ready') return
+
+    if (isSpeaking) {
+      let startTime = performance.now()
+      
+      const animate = () => {
+        const elapsed = (performance.now() - startTime) / 1000
+        
+        try {
+          const headAny = head as any
+          if (headAny.avatar && headAny.avatar.morphTargetInfluences) {
+            const influences = headAny.avatar.morphTargetInfluences
+            const dictionary = headAny.avatar.morphTargetDictionary
+            
+            // Simple mouth animation using sine waves for natural movement
+            const jawOpen = 0.3 + Math.sin(elapsed * 8) * 0.2
+            
+            if (dictionary.jawOpen !== undefined) {
+              influences[dictionary.jawOpen] = Math.max(0, jawOpen)
+            }
+          }
+        } catch (err) {
+          // Ignore animation errors
+        }
+        
+        animationFrameRef.current = requestAnimationFrame(animate)
+      }
+      
+      animate()
+      
+      return () => {
+        if (animationFrameRef.current) {
+          cancelAnimationFrame(animationFrameRef.current)
+          animationFrameRef.current = null
+        }
+        
+        // Reset mouth to neutral
+        try {
+          const headAny = head as any
+          if (headAny.avatar && headAny.avatar.morphTargetInfluences) {
+            const influences = headAny.avatar.morphTargetInfluences
+            const dictionary = headAny.avatar.morphTargetDictionary
+            
+            if (dictionary.jawOpen !== undefined) {
+              influences[dictionary.jawOpen] = 0
+            }
+          }
+        } catch (err) {
+          // Ignore
+        }
+      }
+    }
+  }, [isSpeaking, status])
 
   const overlayMessage = (() => {
     if (status === 'error' && error) return error

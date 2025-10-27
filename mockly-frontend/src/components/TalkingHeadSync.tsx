@@ -17,6 +17,7 @@ type CaptionData = {
   status: 'active' | 'no_data' | 'error'
   last_updated: number
   word_count?: number
+  source?: string
 }
 
 type TalkingHeadSyncProps = {
@@ -41,8 +42,8 @@ function validateMorphTargets(head: TalkingHeadEngine): string | null {
   return null
 }
 
-export function TalkingHeadSync({ 
-  modelUrl = DEFAULT_MODEL_URL, 
+export function TalkingHeadSync({
+  modelUrl = DEFAULT_MODEL_URL,
   className,
   audioUrl,
   enableSync = true,
@@ -54,7 +55,7 @@ export function TalkingHeadSync({
   const animationFrameRef = useRef<number | null>(null)
   const pollIntervalRef = useRef<number | null>(null)
   const captionsRef = useRef<CaptionData | null>(null)
-  
+
   const [status, setStatus] = useState<TalkingHeadStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const [captions, setCaptions] = useState<CaptionData | null>(null)
@@ -85,7 +86,7 @@ export function TalkingHeadSync({
           dracoEnabled: true,
         })
         headRef.current = head
-        
+
         await head.showAvatar({
           url: modelUrl,
           avatarMood: 'neutral',
@@ -136,7 +137,9 @@ export function TalkingHeadSync({
           const data: CaptionData = await response.json()
           setCaptions(data)
           captionsRef.current = data
-          console.log(`[TalkingHeadSync] Fetched ${data.word_count || 0} caption words`)
+          if (data.word_count && data.word_count > 0) {
+            console.log(`[TalkingHeadSync] ✅ Fetched ${data.word_count} caption words from ${data.source || 'unknown'}`)
+          }
         }
       } catch (err) {
         console.error('[TalkingHeadSync] Failed to fetch captions:', err)
@@ -167,7 +170,7 @@ export function TalkingHeadSync({
       if (headAny.avatar && headAny.avatar.morphTargetInfluences) {
         const influences = headAny.avatar.morphTargetInfluences
         const dictionary = headAny.avatar.morphTargetDictionary
-        
+
         if (dictionary.jawOpen !== undefined) {
           influences[dictionary.jawOpen] = 0
         }
@@ -192,7 +195,7 @@ export function TalkingHeadSync({
       // Simple phoneme approximation
       const hasOpenVowel = /[aeiou]/i.test(word)
       const hasLabial = /[bpmw]/i.test(word)
-      
+
       // Natural jaw movement with sine wave
       const jawAmount = hasOpenVowel ? 0.6 : 0.4
       const jawOpen = jawAmount * Math.sin(progress * Math.PI)
@@ -216,28 +219,34 @@ export function TalkingHeadSync({
   const handleAudioPlay = useCallback(() => {
     const head = headRef.current
     const audio = audioRef.current
-    const captionData = captionsRef.current
-    
+
     if (!head || !audio) return
+    
+    // Wait for avatar to be fully loaded before starting animation
+    if (status !== 'ready') {
+      console.warn('[TalkingHeadSync] Avatar not ready yet, waiting...')
+      return
+    }
 
     setIsSpeaking(true)
     setStatus('speaking')
     onSpeakingStateChange?.(true)
 
     console.log('[TalkingHeadSync] Starting synchronized playback')
-    if (captionData?.words) {
-      console.log(`[TalkingHeadSync] Syncing with ${captionData.words.length} words`)
-    }
+    console.log('[TalkingHeadSync] Head ready:', !!head, 'Audio ready:', !!audio)
 
     // Sync loop
     const syncLoop = () => {
-      if (!audio || audio.paused || audio.ended) {
+      const headInstance = headRef.current
+      const audioInstance = audioRef.current
+
+      if (!audioInstance || audioInstance.paused || audioInstance.ended) {
         setIsSpeaking(false)
         setStatus('ready')
         setCurrentWord(null)
         onSpeakingStateChange?.(false)
         resetMouth()
-        
+
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current)
           animationFrameRef.current = null
@@ -245,8 +254,11 @@ export function TalkingHeadSync({
         return
       }
 
-      const currentTime = audio.currentTime
-      
+      const currentTime = audioInstance.currentTime
+
+      // Read the latest captions from ref (might update during playback)
+      const captionData = captionsRef.current
+
       // Find current word being spoken
       if (captionData?.words && captionData.words.length > 0) {
         const word = captionData.words.find(
@@ -255,20 +267,22 @@ export function TalkingHeadSync({
 
         if (word) {
           setCurrentWord(word.word)
-          
+
           // Calculate progress through the word (0 to 1)
           const progress = (currentTime - word.start_time) / (word.end_time - word.start_time)
           animateMouth(word.word, progress)
         } else {
           setCurrentWord(null)
           // Smoothly close mouth between words
-          const headAny = head as any
-          if (headAny.avatar && headAny.avatar.morphTargetInfluences) {
-            const influences = headAny.avatar.morphTargetInfluences
-            const dictionary = headAny.avatar.morphTargetDictionary
-            
-            if (dictionary.jawOpen !== undefined) {
-              influences[dictionary.jawOpen] *= 0.85 // Exponential decay
+          if (headInstance) {
+            const headAny = headInstance as any
+            if (headAny.avatar && headAny.avatar.morphTargetInfluences) {
+              const influences = headAny.avatar.morphTargetInfluences
+              const dictionary = headAny.avatar.morphTargetDictionary
+
+              if (dictionary.jawOpen !== undefined) {
+                influences[dictionary.jawOpen] *= 0.85 // Exponential decay
+              }
             }
           }
         }
@@ -276,19 +290,30 @@ export function TalkingHeadSync({
         // No captions available - use simple audio-based animation
         // This provides basic mouth movement even without word timing
         const simpleJaw = 0.3 + Math.sin(currentTime * 8) * 0.2
-        
+
         try {
-          const headAny = head as any
-          if (headAny.avatar && headAny.avatar.morphTargetInfluences) {
-            const influences = headAny.avatar.morphTargetInfluences
-            const dictionary = headAny.avatar.morphTargetDictionary
-            
-            if (dictionary.jawOpen !== undefined) {
-              influences[dictionary.jawOpen] = simpleJaw
+          if (headInstance) {
+            const headAny = headInstance as any
+            if (headAny.avatar && headAny.avatar.morphTargetInfluences) {
+              const influences = headAny.avatar.morphTargetInfluences
+              const dictionary = headAny.avatar.morphTargetDictionary
+
+              if (dictionary.jawOpen !== undefined) {
+                influences[dictionary.jawOpen] = simpleJaw
+
+                // Log occasionally to confirm animation is running
+                if (Math.floor(currentTime * 10) % 10 === 0) {
+                  console.log(`[TalkingHeadSync] Fallback animation: time=${currentTime.toFixed(2)}s, jaw=${simpleJaw.toFixed(3)}`)
+                }
+              } else {
+                console.warn('[TalkingHeadSync] jawOpen morph target not found')
+              }
+            } else {
+              console.warn('[TalkingHeadSync] Avatar or morphTargetInfluences not available')
             }
           }
         } catch (err) {
-          // Ignore errors
+          console.warn('[TalkingHeadSync] Fallback animation error:', err)
         }
       }
 
@@ -296,27 +321,31 @@ export function TalkingHeadSync({
     }
 
     syncLoop()
-  }, [onSpeakingStateChange, resetMouth, animateMouth])
+  }, [status, onSpeakingStateChange, resetMouth, animateMouth])
 
   const handleAudioEnded = useCallback(() => {
+    console.log('[TalkingHeadSync] Audio playback ended')
     setIsSpeaking(false)
     setStatus('ready')
     setCurrentWord(null)
     onSpeakingStateChange?.(false)
-    
+
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current)
       animationFrameRef.current = null
     }
-    
+
     resetMouth()
   }, [onSpeakingStateChange, resetMouth])
 
   // Manage audio element
   useEffect(() => {
+    console.log('[TalkingHeadSync] audioUrl changed:', audioUrl ? 'URL provided' : 'null')
+
     if (!audioUrl) {
       // Clean up audio
       if (audioRef.current) {
+        console.log('[TalkingHeadSync] Cleaning up previous audio')
         audioRef.current.pause()
         audioRef.current.src = ''
         audioRef.current = null
@@ -326,6 +355,8 @@ export function TalkingHeadSync({
       resetMouth()
       return
     }
+
+    console.log('[TalkingHeadSync] Creating new audio element for:', audioUrl.substring(0, 50))
 
     // Create and configure audio element
     const audio = new Audio(audioUrl)
@@ -342,6 +373,7 @@ export function TalkingHeadSync({
     })
 
     // Start playback
+    console.log('[TalkingHeadSync] Starting audio playback...')
     audio.play().catch(err => {
       console.error('[TalkingHeadSync] Audio playback failed:', err)
       setError('Failed to play audio')
@@ -352,7 +384,7 @@ export function TalkingHeadSync({
       audio.removeEventListener('play', handleAudioPlay)
       audio.removeEventListener('ended', handleAudioEnded)
       audio.removeEventListener('pause', handleAudioEnded)
-      
+
       if (animationFrameRef.current) {
         cancelAnimationFrame(animationFrameRef.current)
         animationFrameRef.current = null

@@ -475,24 +475,22 @@ async def stream_deepgram_tts_raw(sentences: Iterable[str]) -> AsyncIterator[byt
 
 async def stream_elevenlabs_tts(sentences: Iterable[str]) -> AsyncIterator[bytes]:
     """
-    Stream TTS audio from ElevenLabs API.
+    Stream TTS audio from ElevenLabs WebSocket API with word-level timestamps.
     
-    Takes an iterable of text sentences and yields PCM audio bytes suitable
-    for the talking head. Uses the websocket streaming API for low latency.
+    Uses WebSocket API to get both streaming audio AND word alignment data
+    for precise lip synchronization with the talking head avatar.
     """
     try:
-        from elevenlabs.client import ElevenLabs
-        from elevenlabs import Voice, VoiceSettings
+        import websockets
+        import json
     except ImportError as exc:
         raise RuntimeError(
-            "Missing dependency 'elevenlabs'. Install with: pip install elevenlabs"
+            "Missing dependency 'websockets'. Install with: pip install websockets"
         ) from exc
     
-    logging.info(f"[ElevenLabs TTS] Initializing with voice={ELEVENLABS_VOICE_ID}, model={ELEVENLABS_MODEL}")
+    logging.info(f"[ElevenLabs TTS] Initializing WebSocket with voice={ELEVENLABS_VOICE_ID}, model={ELEVENLABS_MODEL}")
     
-    client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-    
-    # Collect sentences to send as a batch for better streaming
+    # Collect sentences to send as a batch
     sentence_buffer = []
     
     if hasattr(sentences, "__aiter__"):
@@ -514,35 +512,141 @@ async def stream_elevenlabs_tts(sentences: Iterable[str]) -> AsyncIterator[bytes
     logging.info(f"[ElevenLabs TTS] Synthesizing {len(full_text)} characters across {len(sentence_buffer)} sentences")
     logging.info(f"[ElevenLabs TTS] Text preview: {full_text[:200]}...")
     
+    # WebSocket URL for ElevenLabs TTS with alignment
+    ws_url = f"wss://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}/stream-input?model_id={ELEVENLABS_MODEL}&output_format={ELEVENLABS_OUTPUT_FORMAT}"
+    
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+    }
+    
+    total_bytes = 0
+    chunk_count = 0
+    start_time = time.perf_counter()
+    word_timestamps = []
+    
     try:
-        # Use streaming API for low latency
-        audio_stream = client.text_to_speech.convert_as_stream(
-            voice_id=ELEVENLABS_VOICE_ID,
-            text=full_text,
-            model_id=ELEVENLABS_MODEL,
-            output_format=ELEVENLABS_OUTPUT_FORMAT,
-        )
-        
-        total_bytes = 0
-        chunk_count = 0
-        start_time = time.perf_counter()
-        
-        for chunk in audio_stream:
-            if chunk:
-                total_bytes += len(chunk)
-                chunk_count += 1
-                if chunk_count == 1:
-                    first_chunk_time = time.perf_counter() - start_time
-                    logging.info(f"[ElevenLabs TTS] First audio chunk after {first_chunk_time*1000:.1f}ms")
-                yield chunk
-                # Allow other async tasks to run
-                await asyncio.sleep(0)
+        async with websockets.connect(ws_url, extra_headers=headers) as websocket:
+            logging.info("[ElevenLabs TTS] WebSocket connected")
+            
+            # Send BOS (Beginning of Stream)
+            bos_message = {
+                "text": " ",
+                "voice_settings": {
+                    "stability": 0.5,
+                    "similarity_boost": 0.75,
+                },
+                "generation_config": {
+                    "chunk_length_schedule": [120, 160, 250, 290]
+                },
+                "xi_api_key": ELEVENLABS_API_KEY,
+            }
+            await websocket.send(json.dumps(bos_message))
+            
+            # Send the text
+            text_message = {
+                "text": full_text,
+                "try_trigger_generation": True,
+            }
+            await websocket.send(json.dumps(text_message))
+            logging.info("[ElevenLabs TTS] Sent text to WebSocket")
+            
+            # Send EOS (End of Stream)
+            eos_message = {"text": ""}
+            await websocket.send(json.dumps(eos_message))
+            
+            # Receive audio chunks and alignment data
+            async for message in websocket:
+                try:
+                    data = json.loads(message)
+                    
+                    # Check for audio chunk
+                    if "audio" in data and data["audio"]:
+                        # Decode base64 audio
+                        import base64
+                        audio_chunk = base64.b64decode(data["audio"])
+                        total_bytes += len(audio_chunk)
+                        chunk_count += 1
+                        
+                        if chunk_count == 1:
+                            first_chunk_time = time.perf_counter() - start_time
+                            logging.info(f"[ElevenLabs TTS] First audio chunk after {first_chunk_time*1000:.1f}ms")
+                        
+                        yield audio_chunk
+                    
+                    # Check for alignment data (word timestamps)
+                    if "alignment" in data and data["alignment"]:
+                        alignment = data["alignment"]
+                        chars = alignment.get("characters", [])
+                        char_start_times = alignment.get("character_start_times_seconds", [])
+                        char_end_times = alignment.get("character_end_times_seconds", [])
+                        
+                        # Convert character-level to word-level timestamps
+                        current_word = ""
+                        word_start = None
+                        
+                        for i, (char, start, end) in enumerate(zip(chars, char_start_times, char_end_times)):
+                            if char.strip():  # Not whitespace
+                                if not current_word:
+                                    word_start = start
+                                current_word += char
+                            else:  # Whitespace - end of word
+                                if current_word and word_start is not None:
+                                    word_timestamps.append({
+                                        "word": current_word,
+                                        "start_time": word_start,
+                                        "end_time": char_end_times[i-1] if i > 0 else end,
+                                    })
+                                    current_word = ""
+                                    word_start = None
+                        
+                        # Don't forget the last word
+                        if current_word and word_start is not None:
+                            word_timestamps.append({
+                                "word": current_word,
+                                "start_time": word_start,
+                                "end_time": char_end_times[-1] if char_end_times else word_start,
+                            })
+                        
+                        logging.info(f"[ElevenLabs TTS] Received alignment data with {len(word_timestamps)} words")
+                    
+                    # Check if generation is complete
+                    if data.get("isFinal", False):
+                        logging.info("[ElevenLabs TTS] Stream complete")
+                        break
+                        
+                except json.JSONDecodeError:
+                    # Not JSON, might be raw audio
+                    logging.warning("[ElevenLabs TTS] Received non-JSON message")
+                    continue
         
         elapsed = time.perf_counter() - start_time
         logging.info(f"[ElevenLabs TTS] Complete: {total_bytes} bytes in {chunk_count} chunks, {elapsed:.2f}s")
+        logging.info(f"[ElevenLabs TTS] Extracted {len(word_timestamps)} word timestamps")
+        
+        # Save word timestamps to file for frontend lip sync
+        if word_timestamps and LIVE_TRANSCRIPTION_PATH:
+            try:
+                from pathlib import Path
+                
+                transcription_data = {
+                    "transcription": word_timestamps,
+                    "status": "active",
+                    "last_updated": time.time(),
+                    "word_count": len(word_timestamps),
+                    "source": "elevenlabs_websocket"
+                }
+                
+                path = Path(LIVE_TRANSCRIPTION_PATH)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(path, 'w') as f:
+                    json.dump(transcription_data, f)
+                
+                logging.info(f"[ElevenLabs TTS] Saved {len(word_timestamps)} word timestamps to {LIVE_TRANSCRIPTION_PATH}")
+            except Exception as e:
+                logging.error(f"[ElevenLabs TTS] Failed to save timestamps: {e}", exc_info=True)
         
     except Exception as exc:
-        logging.error(f"[ElevenLabs TTS] Error during synthesis: {exc}", exc_info=True)
+        logging.error(f"[ElevenLabs TTS] WebSocket error: {exc}", exc_info=True)
         raise
 
 
