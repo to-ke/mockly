@@ -12,8 +12,8 @@ import { useAppState } from '@/stores/app'
 
 
 export default function App() {
-  const { stage, showFeedback } = useAppState()
-  const { language, code, setResult, running, setRunning, resetIO } = useSession()
+  const { stage, showFeedback, difficulty } = useAppState()
+  const { language, code, setResult, running, setRunning, resetIO, lastPrompt } = useSession()
   const [ending, setEnding] = useState(false)
   const [endError, setEndError] = useState<string | null>(null)
 
@@ -49,7 +49,19 @@ export default function App() {
     setEnding(true)
     try {
       setRunning(false)
-      const report = await Api.fetchFeedback()
+      
+      // Prepare question context for evaluation
+      const question = lastPrompt ? {
+        prompt: lastPrompt,
+        difficulty: difficulty,
+      } : undefined
+      
+      // Fetch feedback with code, language, and question context
+      const report = await Api.fetchFeedback({
+        code,
+        language,
+        question,
+      })
       showFeedback(report)
     } catch (err: unknown) {
       if (err instanceof Error) {
